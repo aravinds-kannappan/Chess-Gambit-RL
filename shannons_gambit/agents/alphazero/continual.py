@@ -163,34 +163,42 @@ class ContinualTrainer:
         return {"loss_policy": round(tot_p / n_batches, 4),
                 "loss_value": round(tot_v / n_batches, 4)}
 
+    def _resolve_ckpt(self, entry) -> str:
+        """Checkpoint path: stored path, else by name in the run dir (Hub-pulled)."""
+        if Path(entry.path).exists():
+            return entry.path
+        return str(Path(self.cfg.run_dir) / f"{entry.name}.pt")
+
     def _evaluate(self) -> tuple[float, float]:
-        """Return (anchored Elo, win-rate vs random)."""
+        """Rate the new net.
+
+        Once a baseline exists, rate **relative to the best generation** (head to
+        head) so the ladder fluctuates around the pre-trained baseline as self-play
+        refines or degrades it. Only the very first generation (no baseline) is
+        rated against a fixed random anchor.
+        Returns ``(elo, win_rate_vs_anchor)``.
+        """
         cfg = self.cfg
         self.model.eval()
         new_agent = AlphaZeroAgent(self.model, device=self.device, simulations=cfg.eval_sims)
-        random_agent = RandomAgent(seed=123)
-
-        anchors: list[tuple[object, float]] = [(random_agent, cfg.random_anchor_elo)]
-        best = self.ladder.best()
-        if best is not None and Path(best.path).exists():
-            prev_model, _ = load_model(best.path, map_location=self.device)
-            anchors.append(
-                (AlphaZeroAgent(prev_model.to(self.device), device=self.device,
-                                simulations=cfg.eval_sims), best.elo)
-            )
 
         from ...eval.elo import estimate_rating
 
-        results = []
-        win_rate_random = 0.5
-        for agent, anchor_elo in anchors:
-            pts = _match_points(new_agent, agent, cfg.eval_games, cfg.max_moves)
-            results.append((anchor_elo, pts, cfg.eval_games))
-            if agent is random_agent:
-                win_rate_random = pts / cfg.eval_games
-        init = best.elo if best is not None else (cfg.random_anchor_elo + 200)
-        elo = estimate_rating(results, init=init)
-        return elo, win_rate_random
+        best = self.ladder.best()
+        ckpt = self._resolve_ckpt(best) if best is not None else None
+        if best is not None and Path(ckpt).exists():
+            prev_model, _ = load_model(ckpt, map_location=self.device)
+            anchor = AlphaZeroAgent(prev_model.to(self.device), device=self.device,
+                                    simulations=cfg.eval_sims)
+            pts = _match_points(new_agent, anchor, cfg.eval_games, cfg.max_moves)
+            elo = estimate_rating([(best.elo, pts, cfg.eval_games)], init=best.elo)
+            return elo, round(pts / cfg.eval_games, 3)
+
+        random_agent = RandomAgent(seed=123)
+        pts = _match_points(new_agent, random_agent, cfg.eval_games, cfg.max_moves)
+        elo = estimate_rating([(cfg.random_anchor_elo, pts, cfg.eval_games)],
+                              init=cfg.random_anchor_elo + 200)
+        return elo, round(pts / cfg.eval_games, 3)
 
 
 def run_generations(cfg: ContinualConfig, n_gens: int) -> dict:
