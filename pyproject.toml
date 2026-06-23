@@ -37,6 +37,9 @@ sgambit = "shannons_gambit.cli:main"
 [tool.setuptools.packages.find]
 include = ["shannons_gambit*"]
 
+[tool.setuptools.package-data]
+"shannons_gambit.data" = ["*.pgn"]
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

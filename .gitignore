@@ -9,9 +9,10 @@ dist/
 .ruff_cache/
 .pytest_cache/
 
-# Project outputs
-data/
-runs/
+# Project outputs (anchored to repo root so they do NOT match
+# shannons_gambit/data/ or web/public/data/)
+/data/
+/runs/
 *.pt
 *.pth
 *.parquet
