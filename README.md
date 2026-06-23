@@ -267,7 +267,7 @@ sgambit export --hf aravinds-kannappan/shannons-gambit --model runs/supervised/m
 # Web side: web/.env.local  (copy from web/.env.example)
 HF_ENDPOINT_URL=https://<your-endpoint>.endpoints.huggingface.cloud
 HF_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-HF_MODEL_ID=aravinds-kannappan/shannons-gambit
+HF_MODEL_ID=legacyaravind/shannons-gambit
 ```
 
 On Vercel, set the three `HF_*` web variables under **Project → Settings →
