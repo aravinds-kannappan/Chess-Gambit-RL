@@ -8,6 +8,51 @@ from pathlib import Path
 WEB_DATA_DIR = Path("web/public/data")
 
 
+# --- Hub persistence for the continuous-training ladder --------------------
+
+def push_ladder_to_hub(repo_id: str, run_dir: str, *, keep_last: int = 12) -> str:
+    """Upload ladder.json + recent generation checkpoints to a HF model repo.
+
+    The Hub is the durable store, so a free Space with ephemeral disk loses nothing
+    on restart. Only the most recent ``keep_last`` checkpoints are kept hot.
+    """
+    from huggingface_hub import HfApi, create_repo
+
+    run = Path(run_dir)
+    create_repo(repo_id, exist_ok=True, repo_type="model")
+    api = HfApi()
+    ladder = run / "ladder.json"
+    if ladder.exists():
+        api.upload_file(path_or_fileobj=str(ladder), path_in_repo="ladder.json", repo_id=repo_id)
+    ckpts = sorted(run.glob("gen-*.pt"))[-keep_last:]
+    for ck in ckpts:
+        api.upload_file(path_or_fileobj=str(ck), path_in_repo=ck.name, repo_id=repo_id)
+    return f"https://huggingface.co/{repo_id}"
+
+
+def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
+    """Download ladder.json + its checkpoints from a HF model repo into ``run_dir``.
+
+    Returns True if a ladder was found. Best-effort; returns False on any failure.
+    """
+    from huggingface_hub import hf_hub_download
+
+    run = Path(run_dir)
+    run.mkdir(parents=True, exist_ok=True)
+    try:
+        ladder_path = hf_hub_download(repo_id, "ladder.json", local_dir=str(run))
+    except Exception:
+        return False
+    data = json.loads(Path(ladder_path).read_text())
+    for gen in data.get("generations", []):
+        name = f"{gen['name']}.pt"
+        try:
+            hf_hub_download(repo_id, name, local_dir=str(run))
+        except Exception:
+            continue
+    return True
+
+
 def write_web_data(payloads: dict[str, dict], *, out_dir: str | Path = WEB_DATA_DIR) -> list[str]:
     """Write ``{name: json-serialisable}`` payloads into the web public dir."""
     out = Path(out_dir)

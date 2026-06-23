@@ -7,59 +7,49 @@ export default function Home() {
         Shannon&apos;s <span>Gambit</span>
       </h1>
       <p className="subtitle">
-        Information-theoretic reinforcement learning for chess. Agents formalised
-        as a Markov Decision Process, solved with Bellman optimality, and trained
-        with deep RL on real Lichess games.
+        A chess intelligence that trains itself. Agents improve by continuous
+        self-play on Hugging Face, every generation is versioned and rated, and
+        the model adapts to how you play.
       </p>
 
       <div className="grid cols-2">
         <Link href="/play" className="card" style={{ display: "block" }}>
-          <h2>♟ Play the agent</h2>
+          <h2>♟ Play an agent that learns</h2>
           <p className="muted">
-            Play a full game against the trained network (or the built-in
-            heuristic agent), served through the Hugging Face Inference API.
+            Play the trained network; your games train a personal checkpoint that
+            adapts to your style. Press Retrain to fine-tune it on how you play.
           </p>
         </Link>
-        <Link href="/analysis" className="card" style={{ display: "block" }}>
-          <h2>📊 Information dashboard</h2>
+        <Link href="/watch" className="card" style={{ display: "block" }}>
+          <h2>👀 Watch mode</h2>
           <p className="muted">
-            Move-choice entropy, mutual information between board features and the
-            result, and where a game&apos;s outcome uncertainty collapses.
+            Pair two agents at chosen Elo levels and watch them play. The backend
+            serves the nearest ladder snapshot tuned to each target strength.
+          </p>
+        </Link>
+        <Link href="/research" className="card" style={{ display: "block" }}>
+          <h2>📈 Research</h2>
+          <p className="muted">
+            Live training graphs: Elo per self-play generation, falling loss
+            curves, and the information-theoretic analysis of real games.
           </p>
         </Link>
         <Link href="/predict" className="card" style={{ display: "block" }}>
-          <h2>🔮 Live prediction</h2>
+          <h2>🔮 Predict</h2>
           <p className="muted">
-            Paste a FEN or PGN to get win/draw/loss, the best move, and an
-            estimated player rating from the prediction model.
-          </p>
-        </Link>
-        <Link href="/arena" className="card" style={{ display: "block" }}>
-          <h2>🏆 Agent arena</h2>
-          <p className="muted">
-            Elo leaderboard from round-robin matches between the random, tabular,
-            DQN, supervised, and AlphaZero-lite agents.
+            Paste a FEN or PGN to get win/draw/loss, the best move, and a value
+            estimate from the current best network.
           </p>
         </Link>
       </div>
 
       <div className="card" style={{ marginTop: "1.25rem" }}>
-        <h2>How it fits together</h2>
+        <h2>End to end, owned</h2>
         <ul className="muted">
-          <li>
-            <b>Information theory</b> - Shannon entropy, KL/JS divergence, and
-            mutual information quantify policies and positions.
-          </li>
-          <li>
-            <b>MDP + Bellman</b> - endgames (KRvK/KQvK) are enumerated and solved
-            exactly by value/policy iteration; tabular Q-learning recovers the
-            optimum from experience.
-          </li>
-          <li>
-            <b>Deep RL</b> - a DQN validated against the solved value table, and a
-            small AlphaZero-lite (policy/value net + PUCT MCTS self-play)
-            bootstrapped from supervised behavioural cloning.
-          </li>
+          <li><b>Pre-train</b> - behavioural cloning on real Lichess games.</li>
+          <li><b>Self-play RL</b> - AlphaZero-style MCTS self-play improves the network generation over generation; each checkpoint is rated on a stable Elo ladder.</li>
+          <li><b>Adapt</b> - live opponent-modeling plus genuine per-session fine-tuning of a personal checkpoint.</li>
+          <li><b>Serve</b> - a Hugging Face Space trains and serves; the site is a thin client with no heuristic fallback.</li>
         </ul>
       </div>
     </main>

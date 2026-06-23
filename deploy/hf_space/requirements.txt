@@ -1,0 +1,9 @@
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+torch>=2.3
+python-chess>=1.11
+numpy>=1.26
+huggingface_hub>=0.23
+# The full RL/serving package (encoding, MCTS, continual trainer, server).
+shannons-gambit @ git+https://github.com/aravinds-kannappan/Chess-Gambit-RL.git

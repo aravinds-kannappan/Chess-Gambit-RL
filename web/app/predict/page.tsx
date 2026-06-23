@@ -30,7 +30,20 @@ export default function PredictPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      setResult(await res.json());
+      const d = await res.json();
+      if (!res.ok || d.error) {
+        setResult({ error: d.error === "backend warming up" ? "Backend warming up - try again shortly." : (d.error ?? "error") } as PredictResult);
+      } else {
+        // Normalize the Space's snake_case response.
+        setResult({
+          bestMove: d.best_move ?? d.bestMove ?? "",
+          wdl: d.wdl ?? { win: 0, draw: 0, loss: 0 },
+          value: d.value ?? 0,
+          rating: d.rating ?? 0,
+          policyEntropyBits: d.policy_entropy_bits ?? 0,
+          source: d.source ?? "model",
+        });
+      }
     } finally {
       setLoading(false);
     }

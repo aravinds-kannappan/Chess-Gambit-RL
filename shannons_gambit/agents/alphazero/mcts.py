@@ -117,12 +117,27 @@ class MCTS:
 
 
 class AlphaZeroAgent(Agent):
+    """MCTS agent with strength knobs for Elo calibration.
+
+    Strength is lowered by reducing ``simulations``, raising ``temperature``
+    (sample softer from visit counts), or injecting a ``blunder_rate`` of uniform
+    random moves -- so one checkpoint can be tuned to a target Elo between ladder
+    snapshots.
+    """
+
     name = "alphazero"
 
     def __init__(self, model, *, device: str = "cpu", simulations: int = 64,
-                 c_puct: float = 1.5) -> None:
+                 c_puct: float = 1.5, temperature: float = 0.0,
+                 blunder_rate: float = 0.0, name: str | None = None,
+                 seed: int = 0) -> None:
         self.mcts = MCTS(model, device=device, c_puct=c_puct)
         self.simulations = simulations
+        self.temperature = temperature
+        self.blunder_rate = blunder_rate
+        self._rng = np.random.default_rng(seed)
+        if name:
+            self.name = name
 
     @classmethod
     def from_checkpoint(cls, path: str, device: str = "cpu", **kw) -> AlphaZeroAgent:
@@ -132,5 +147,14 @@ class AlphaZeroAgent(Agent):
         return cls(model, device=device, **kw)
 
     def select_move(self, board: chess.Board) -> chess.Move:
+        legal = list(board.legal_moves)
+        if self.blunder_rate > 0 and self._rng.random() < self.blunder_rate:
+            return legal[int(self._rng.integers(len(legal)))]
         visits = self.mcts.run(board, simulations=self.simulations, add_noise=False)
-        return max(visits.items(), key=lambda kv: kv[1])[0]
+        moves = list(visits)
+        counts = np.array([visits[m] for m in moves], dtype=np.float64)
+        if self.temperature <= 0 or counts.sum() == 0:
+            return moves[int(counts.argmax())]
+        weights = counts ** (1.0 / self.temperature)
+        probs = weights / weights.sum()
+        return moves[int(self._rng.choice(len(moves), p=probs))]

@@ -87,6 +87,26 @@ def _cmd_train(args: argparse.Namespace) -> None:
             print(json.dumps(agent.evaluate(n=400, max_dtm=d), indent=2))
 
 
+def _cmd_train_continual(args: argparse.Namespace) -> None:
+    from dataclasses import replace
+
+    from .agents.alphazero.continual import run_generations
+    from .config import ContinualConfig
+
+    cfg = ContinualConfig(run_dir=args.run_dir)
+    if args.scratch:
+        cfg = replace(cfg, init_from="")
+    res = run_generations(cfg, args.gens)
+    print(json.dumps(res["elo_curve"], indent=2))
+
+
+def _cmd_ladder(args: argparse.Namespace) -> None:
+    from .agents.ladder import Ladder
+
+    ladder = Ladder.load(args.run_dir)
+    print(json.dumps({"levels": ladder.levels(), "elo_curve": ladder.elo_curve()}, indent=2))
+
+
 def _cmd_analyze(args: argparse.Namespace) -> None:
     from . import reports
     from .data.dataset import load_records
@@ -194,6 +214,16 @@ def main(argv: list[str] | None = None) -> None:
     t.add_argument("--preset", default="local_full")
     t.add_argument("--episodes", type=int, default=40000, help="tabular only")
     t.set_defaults(func=_cmd_train)
+
+    tc = sub.add_parser("train-continual", help="run N self-play generations (versioned ladder)")
+    tc.add_argument("--gens", type=int, default=3)
+    tc.add_argument("--run-dir", default="runs/continual", dest="run_dir")
+    tc.add_argument("--scratch", action="store_true", help="start from a random net")
+    tc.set_defaults(func=_cmd_train_continual)
+
+    lc = sub.add_parser("ladder", help="print the checkpoint ladder (Elo per generation)")
+    lc.add_argument("--run-dir", default="runs/continual", dest="run_dir")
+    lc.set_defaults(func=_cmd_ladder)
 
     a = sub.add_parser("analyze", help="information-theory report over the data")
     a.add_argument("--data", default="data")

@@ -128,6 +128,34 @@ class AlphaZeroConfig:
     seed: int = 0
 
 
+@dataclass(frozen=True)
+class ContinualConfig:
+    """Continuous self-play: one resumable generation = self-play -> train -> rate."""
+
+    run_dir: str = "runs/continual"
+    init_from: str = "runs/supervised/model.pt"  # bootstrap ("" = scratch)
+    net: NetConfig = field(default_factory=NetConfig)
+    # self-play per generation
+    simulations: int = 48
+    c_puct: float = 1.5
+    dirichlet_alpha: float = 0.3
+    dirichlet_eps: float = 0.25
+    temperature_moves: int = 12
+    games_per_gen: int = 8
+    max_moves: int = 80
+    buffer_games: int = 80
+    # training per generation
+    batch_size: int = 128
+    lr: float = 5e-4
+    epochs_per_gen: int = 2
+    # anchored Elo evaluation
+    eval_games: int = 6      # games vs each anchor agent
+    eval_sims: int = 24      # MCTS sims during evaluation (cheap)
+    random_anchor_elo: float = 600.0  # fixes the absolute Elo scale
+    device: str = "auto"
+    seed: int = 0
+
+
 _PRESETS: dict[str, dict] = {
     "local_smoke": {
         "data": replace(DataConfig(), max_games=200),

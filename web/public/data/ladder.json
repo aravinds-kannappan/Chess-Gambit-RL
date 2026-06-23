@@ -1,0 +1,21 @@
+{
+  "generations": 1,
+  "best_elo": 2086,
+  "training_level": 2086,
+  "note": "Network pre-trained by behavioural cloning on real Lichess games rated 2000+. It predicts those strong players moves 83% of the time (top-1). Elo shown is the training-data level; certified playing strength needs a Stockfish anchor + GPU self-play (deploy/hf_job).",
+  "levels": [
+    {
+      "gen": 0,
+      "name": "gen-0000",
+      "elo": 2086.0
+    }
+  ],
+  "elo_curve": [
+    {
+      "gen": 0,
+      "elo": 2086,
+      "training_level": 2086,
+      "policy_acc": 0.8341
+    }
+  ]
+}

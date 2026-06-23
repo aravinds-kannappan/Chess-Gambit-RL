@@ -2,285 +2,153 @@
 
 # ♟ Shannon's Gambit
 
-### Information-Theoretic Reinforcement Learning for Chess
+### A self-improving chess intelligence
 
-**Markov Decision Processes · Bellman optimality · Deep RL · real Lichess data · a deployable web app**
+**Continuous self-play reinforcement learning · trained + served on Hugging Face · real Lichess data · adaptive play · a deployable web app**
 
 [![CI](https://github.com/aravinds-kannappan/Chess-Gambit-RL/actions/workflows/ci.yml/badge.svg)](https://github.com/aravinds-kannappan/Chess-Gambit-RL/actions)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/)
-[![Next.js](https://img.shields.io/badge/web-Next.js%20on%20Vercel-black.svg)](web/)
 
 </div>
 
 ---
 
-## Why "Shannon's Gambit"?
+## What it is
 
-Claude Shannon wrote both *"A Mathematical Theory of Communication"* (1948), which
-founded **information theory**, and *"Programming a Computer for Playing Chess"*
-(1950), which founded **computer chess**. This project deliberately sits at the
-intersection of those two papers: it treats chess as a problem of *uncertainty
-and information*, formalises play as a **Markov Decision Process**, solves it with
-**Bellman optimality** where tractable, and learns it with **deep reinforcement
-learning** where it is not - all on **real human game data**.
+An end-to-end chess RL system that **owns the whole pipeline**: it pre-trains on
+real Lichess games, improves by **continuous AlphaZero-style self-play**, versions
+every generation on an **Elo ladder**, **adapts to how you play**, and serves it all
+from a **Hugging Face Space that both trains and serves** — with **no heuristic
+fallback**. The Next.js site is a thin client over that backend.
 
----
+| Surface | What it does |
+| --- | --- |
+| **Play** | Play the trained network; your games train a *personal* checkpoint that adapts to your style (press Retrain to fine-tune it). |
+| **Watch** | Pair two agents at chosen **Elo** levels and watch them play; the backend serves the nearest ladder snapshot tuned to each strength. |
+| **Research** | Live training graphs: Elo per self-play generation, falling loss curves, and the information-theoretic analysis of real games. |
+| **Predict** | FEN/PGN → win/draw/loss, best move, value, from the current best network. |
+| **Ladder** | Every self-play generation as a rated checkpoint. |
 
-## What this project is
+## How strength works (read this before judging the Elo)
 
-A single, coherent system that unifies three bodies of theory and ships the
-result as an interactive, deployable web app:
+Genuine playing strength comes from two things this project is honest about:
 
-| Pillar | What it does | Where |
-| --- | --- | --- |
-| **Information theory** | Shannon entropy, KL/JS divergence, mutual information; quantifies policies, positions, and "where games are decided" | `shannons_gambit/infotheory/` |
-| **MDP + Bellman** | Enumerates KRvK/KQvK endgames and solves them *exactly* with value/policy iteration; tabular Q-learning recovers the optimum from experience | `shannons_gambit/mdp/`, `agents/tabular_q.py` |
-| **Deep RL** | A DQN validated against the exact value table, and a small **AlphaZero-lite** (policy/value net + PUCT MCTS self-play) bootstrapped from supervised play | `shannons_gambit/agents/dqn.py`, `agents/alphazero/` |
-| **Prediction model** | Multi-head residual net trained on real games: next-move, win/draw/loss, value, and player-rating heads | `shannons_gambit/models/` |
-| **Web app** | Play the agent, explore the information dashboard, run live predictions, browse the Elo arena | `web/` (Next.js → Vercel) |
+1. **Real data.** The network is pre-trained by behavioural cloning on **real
+   Lichess games filtered to strong players** (the bundled run uses 2000+ rated
+   games from the [Lichess open database](https://database.lichess.org/)). This is
+   what teaches it real chess; a network trained on a few toy games cannot play.
+2. **Search + scale.** MCTS adds lookahead at serve time, and self-play refines the
+   network over generations. AlphaZero reached superhuman with *thousands of
+   TPU-hours* — strength scales with compute and data.
 
-Everything is **real**: the data is real Lichess games, the models are actually
-trained (losses decrease, checkpoints are written), and the theory is verified
-against analytic identities and exact ground truth.
+**On the Elo number:** a meaningful "2000 Elo" must be **anchored to a calibrated
+reference** (Stockfish at known skill levels) — see `shannons_gambit/eval/stockfish_ref.py`.
+Without that anchor, any Elo is only relative. The repo ships:
 
----
+- the pre-training pipeline on real strong-player Lichess data,
+- a **Stockfish-anchored evaluator** to place the agent on a real scale,
+- a **GPU training job** (`deploy/hf_job/run.py`) that trains on hundreds of
+  thousands of 2000+ games and self-plays — the realistic path to and past 2000.
+
+Reaching a *certified* 2000+ requires running that job on a GPU (HF Jobs, funded by
+HF credit, or your own machine) with a Stockfish binary present. A laptop CPU
+trains a network that genuinely plays, but cannot certify or reach 2000 on its own.
+
+## Architecture
+
+```
+  ┌──────────────────────── Hugging Face Space (Docker, FastAPI) ────────────────────────┐
+  │  TRAINS: continuous self-play (ContinualTrainer) → new versioned generation           │
+  │  SERVES: /move /watch-move /predict by target Elo from the checkpoint ladder           │
+  │  ADAPTS: /log_game, /adapt → per-session fine-tuned personal checkpoint                 │
+  │     │ push checkpoints + ladder.json            │ (GPU bursts via HF Jobs, optional)    │
+  │     ▼                                            ▼                                       │
+  │  model repo  legacyaravind/shannons-gambit (gen-*.pt, ladder.json)                      │
+  └───────────────────────────────────▲───────────────────────────────────────────────────┘
+                                       │ HTTPS (server-side, no fallback)
+                Next.js on Vercel:  /play  /watch  /research  /predict  /ladder
+```
+
+- **Pre-train** — behavioural cloning on real Lichess games (`models/supervised.py`).
+- **Self-play RL** — MCTS self-play improves the net each generation; each checkpoint
+  is rated on a stable anchored Elo ladder (`agents/alphazero/continual.py`, `agents/ladder.py`).
+- **Adapt** — live opponent-modeling + genuine per-session fine-tuning (`agents/adaptive.py`).
+- **Serve** — the Space (`deploy/hf_space/app.py`) over the package's `serve.py`; the site
+  has **no heuristic fallback** (`web/`).
+- **Foundations** — exact MDP/Bellman endgames, tabular Q, DQN, and the information-theory
+  analysis from the project's first phase remain in `mdp/`, `agents/`, `infotheory/`.
 
 ## Quickstart
 
 ```bash
-# 1. Install (Python 3.10+)
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[ml,dev]"
 
-# 2. Get real data (bundled sample works offline; or pull a real Lichess dump)
-python scripts/download_data.py --games 20000          # real Lichess open DB
-#   ... or just use the bundled historical games for an offline smoke run.
+# Real strong-player data from the Lichess open database
+python scripts/download_data.py --source \
+  https://database.lichess.org/standard/lichess_db_standard_rated_2013-01.pgn.zst \
+  --games 120000 --min-elo 2000
 
-# 3. Solve an endgame exactly with Bellman value iteration
-sgambit mdp --endgame KRvK
-#   -> value iteration converges; the optimal policy forces mate from every won position
+sgambit train supervised --preset local_full     # pre-train (behavioural cloning)
+sgambit train-continual --gens 5                 # self-play generations (versioned ladder)
+sgambit ladder                                   # Elo per generation
 
-# 4. Train the prediction / behavioural-cloning model on real games
-sgambit train supervised --preset local_full
-
-# 5. Information-theory report (entropy, mutual information, info-gain-per-ply)
-sgambit analyze
-
-# 6. Round-robin Elo arena between the agents
-sgambit arena
-
-# 7. Live prediction from any position
-sgambit predict --fen "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3"
-
-# 8. Run the web app locally
-cd web && npm install && npm run dev      # http://localhost:3000
+# Serve locally (the Space app)
+cd deploy/hf_space && MODELS_DIR=../../runs/continual TRAIN_ENABLED=0 \
+  uvicorn app:app --port 7860
+# then run the site against it:
+cd ../../web && HF_SPACE_URL=http://localhost:7860 npm install && npm run dev
 ```
 
-Everything also runs as a tiny, fast smoke via `--preset local_smoke`, and scales
-to a serious run via `--preset cloud` - a config change, not a rewrite.
+To chase 2000 on GPU:
 
----
-
-## System design
-
+```bash
+hf jobs run --flavor a10g-small --secrets HF_TOKEN \
+  python deploy/hf_job/run.py --min-elo 2000 --games 400000 --epochs 12
 ```
-                         real Lichess PGN (zstd)
-                                  │  stream + parse (python-chess)
-                                  ▼
-                    ┌──────────────────────────┐
-                    │  data/  encode.py         │  board → 18×8×8 planes
-                    │         dataset.py        │  parquet position shards
-                    └────────────┬─────────────┘
-                                 │
-        ┌────────────────────────┼─────────────────────────────┐
-        ▼                        ▼                              ▼
- ┌──────────────┐        ┌───────────────┐             ┌──────────────────┐
- │  mdp/        │        │  models/      │             │  infotheory/     │
- │  Bellman VI  │        │  ChessNet     │  supervised │  entropy, KL,    │
- │  exact KRvK  │        │  4 heads      │◀── pretrain │  mutual info     │
- └──────┬───────┘        └──────┬────────┘             └────────┬─────────┘
-        │ V* (potential)        │ bootstrap                     │
-        ▼                       ▼                               │
- ┌──────────────┐   ┌────────────────────────┐                 │
- │ agents/      │   │ agents/alphazero/      │                 │
- │ tabular_q    │   │ MCTS + self-play       │                 │
- │ dqn (shaped) │   │ (deep RL)              │                 │
- └──────┬───────┘   └───────────┬────────────┘                 │
-        └──────────────┬────────┘                              │
-                       ▼                                        ▼
-                 eval/ arena + Elo  ───────────►  export →  web/ (Next.js / Vercel)
-                                                  HF hub  →  Hugging Face model
-```
-
-**Key design decisions**
-
-- **One shared encoding** (`data/encode.py`): an 18-plane board tensor and the
-  reversible AlphaZero **4672-move index**. Every model - supervised, DQN,
-  AlphaZero, prediction - speaks the same representation, tested by an exact
-  round-trip over thousands of legal moves.
-- **One shared network** (`models/net.py`): a residual tower with four heads
-  (policy / value / WDL / rating). Supervised pretraining produces both the
-  released prediction model **and** the bootstrap weights for self-play, so a
-  laptop run refines a sensible network instead of starting from noise.
-- **Exact where possible, learned where necessary.** Full chess (~10⁴⁴ states)
-  is intractable for tabular methods, so Bellman is made *provably correct* on
-  enumerable endgames; deep RL takes over for the full game.
-- **The Bellman solution feeds the deep RL.** The exact value table V\* is used
-  as a **potential-based shaping reward** for DQN - theoretically policy-preserving,
-  and a concrete bridge from the MDP pillar to the deep-RL pillar.
-- **The heavy model never runs on Vercel.** Weights live on Hugging Face; the
-  web app proxies an Inference Endpoint and falls back to a built-in TypeScript
-  agent so the site is always responsive.
-
----
 
 ## Repository structure
 
 ```
 Chess-Gambit-RL/
-├── shannons_gambit/          # Python package (import name)
-│   ├── cli.py                # `sgambit` CLI: data, mdp, train, analyze, arena, predict, export
-│   ├── config.py             # frozen dataclass configs + local_smoke / local_full / cloud presets
-│   ├── data/                 # encode.py (planes + 4672 moves), lichess.py, dataset.py, sample_games.pgn
-│   ├── mdp/                  # bellman.py (VI/PI/QVI), endgames.py, chess_mdp.py (env + exact solver)
-│   ├── infotheory/           # entropy.py, divergence.py, analysis.py
-│   ├── agents/               # base, random, tabular_q, dqn, alphazero/{mcts,selfplay,train}, neural
-│   ├── models/               # net.py (ChessNet), supervised.py, prediction.py
-│   ├── eval/                 # arena.py, elo.py
-│   ├── reports.py            # ties data + models to the information-theory measures
-│   └── export.py             # web JSON + Hugging Face upload + model card
-├── tests/                    # unittest suite (encoding, Bellman, info theory, data, MCTS, arena, supervised, endgame)
-├── scripts/                  # download_data.py, quality_gate.py
-├── notebooks/                # reproducible notebook (tests + graphs)
-├── web/                      # Next.js app (Vercel): play / analysis / predict / arena + API routes
-├── docs/                     # ARCHITECTURE.md, GETTING_STARTED.md, THEORY.md
-└── pyproject.toml            # distribution "shannons-gambit"; CLI entry `sgambit`
+├── shannons_gambit/
+│   ├── agents/
+│   │   ├── alphazero/{mcts,selfplay,train,continual}.py   # MCTS self-play + continual loop
+│   │   ├── ladder.py            # versioned Elo ladder
+│   │   ├── adaptive.py          # opponent model + per-session fine-tune
+│   │   └── tabular_q.py, dqn.py, random_agent.py
+│   ├── serve.py                 # ModelServer: pick checkpoint by Elo, tune strength
+│   ├── models/  data/  mdp/  infotheory/  eval/ (+ stockfish_ref.py)
+│   ├── export.py                # Hub persistence (push/pull ladder)
+│   └── cli.py                   # sgambit: data, train, train-continual, ladder, analyze, ...
+├── deploy/
+│   ├── hf_space/                # Docker FastAPI Space (trains + serves)
+│   ├── hf_job/                  # GPU training job (path to 2000)
+│   └── hf_endpoint/             # legacy single-checkpoint inference handler
+├── web/                         # Next.js app: play / watch / research / predict / ladder (no fallback)
+├── notebooks/                   # reproducible notebook with graphs
+└── tests/                       # unittest suite
 ```
 
-> **Naming:** the GitHub repo is **Chess-Gambit-RL**, the distribution is
-> **shannons-gambit**, and the import package is **shannons_gambit** - the same
-> three-name pattern as `scikit-learn` → `sklearn`. They are intentionally distinct.
+## Deploying
 
----
+1. **HF Space** — create a Docker Space, point it at `deploy/hf_space/`, set
+   `HF_MODEL_REPO`, `HF_TOKEN`, `TRAIN_ENABLED=1`. It trains and serves; checkpoints
+   persist to the model repo. (See `deploy/hf_space/README.md`.)
+2. **Vercel** — root `web/`, set `HF_SPACE_URL` (and `HF_SPACE_TOKEN` if private) to the
+   Space. The site has no fallback, so the Space must be reachable.
 
-## Results (reproducible)
+## Limitations (stated honestly)
 
-> Numbers below come from the local pipeline; the notebook regenerates every plot.
-
-- **MDP / Bellman (exact).** KRvK enumerates **399,112** states; value iteration
-  converges in ~33 sweeps to `‖ΔV‖∞ = 0`. The derived optimal policy **forces
-  mate from 100% of won positions**, and the implied mate-distance matches actual
-  play (e.g., a central position mates in 23 plies = DTM 23).
-- **Tabular Q-learning (learned).** With a mate-distance curriculum, it converts
-  **~71%** of positions within 4-8 plies of mate against a random defender,
-  degrading gracefully with distance - genuine learning from experience, never
-  shown the value table.
-- **Information theory.** Over real positions, **material difference carries the
-  most information** about the result (highest mutual information), ahead of
-  mobility; outcome entropy collapses sharply at the decisive moment of a game.
-- **Prediction model.** Multi-head training drives policy, WDL, value, and rating
-  losses down together; the WDL head and rating head give the live-prediction page.
-- **Deep RL (DQN) - see Limitations.** A flat 4672-action DQN is a poor structural
-  fit for forced-mate search; potential-based shaping with V\* helps, but tabular
-  memorisation and AlphaZero-style policy/value+MCTS remain the effective methods.
-
----
-
-## Tradeoffs & limitations
-
-- **DQN vs. the problem structure.** A Q-network over 4672 move indices must learn
-  a position-specific *mapping* to the mating move, which generalises poorly from
-  sparse reward; tabular Q (memorisation) and AlphaZero-lite (policy/value + search)
-  both do better. We keep DQN as an honest, instructive baseline and use the exact
-  Bellman value as a shaping potential to show how much the MDP solution helps.
-- **Compute.** Designed to run on a laptop (Apple M4 / MPS); the default nets and
-  self-play volumes are modest. The `cloud` preset scales depth/width, simulations,
-  and data without code changes - AlphaZero-style strength needs that budget.
-- **Offline data.** A small set of real historical games is bundled so the whole
-  pipeline (and CI) runs with no network; serious training pulls a real monthly
-  Lichess dump via `scripts/download_data.py`.
-- **Exact solving is endgame-only.** Bellman value iteration is applied to KRvK/KQvK
-  because they are enumerable; the full game is intractable for tabular methods by
-  design, which is precisely why deep RL exists in the stack.
-
----
-
-## Why open source?
-
-- **Reproducible research over claims.** Information theory + RL is often discussed
-  abstractly; here every measure is computed on real data, every model is trained
-  from a single command, and a notebook regenerates the figures. Anyone can audit
-  the gap between theory and practice (including the DQN limitation above).
-- **A teaching artifact.** The codebase is a guided tour from the Bellman equation
-  on a solvable endgame to MCTS self-play on the full game, with the information-
-  theoretic lens connecting them. It is meant to be read.
-- **Permissive licence.** Apache-2.0 (with an explicit patent grant) so the code,
-  the trained weights (Hugging Face), and the analysis can be freely reused.
-
----
-
-## Reproducibility
-
-```bash
-# Full local quality gate: lint + unit tests + a tiny end-to-end smoke train
-python scripts/quality_gate.py
-
-# Unit tests only
-python -m unittest discover -s tests
-
-# The notebook re-runs the checks and regenerates every graph
-jupyter notebook notebooks/shannons_gambit_reproduce.ipynb
-```
-
-The test suite covers the move-encoding round-trip, Bellman convergence and the
-forced-mate guarantee, the information-theoretic identities, the data pipeline on
-real games, MCTS legality, Elo/arena bookkeeping, and a real supervised train step.
-
----
-
-## Deploying the web app
-
-The app under `web/` is a standard Next.js (App Router) project; point Vercel at
-the `web/` directory and deploy. It works immediately with the built-in agent and
-upgrades to the trained model when a Hugging Face endpoint is configured (below).
-
----
-
-## Configuration - API keys & environment variables
-
-Everything runs **with no keys at all** (offline data + the built-in web agent).
-Keys only unlock the *hosted* paths:
-
-| Variable | Where | Needed for | How to get it |
-| --- | --- | --- | --- |
-| `HF_TOKEN` | shell env (Python) | `sgambit export --hf` to upload weights to the Hugging Face Hub | https://huggingface.co/settings/tokens (a *write* token) |
-| `HF_ENDPOINT_URL` | `web/.env.local` & Vercel env | The web app proxying the trained model for play/predict | URL of your deployed [HF Inference Endpoint](https://ui.endpoints.huggingface.co/) serving the model |
-| `HF_API_TOKEN` | `web/.env.local` & Vercel env | Auth for the above endpoint (if private) | https://huggingface.co/settings/tokens (a *read* token) |
-| `HF_MODEL_ID` | `web/.env.local` & Vercel env | Display / model card link | e.g. `legacyaravind/shannons-gambit` |
-
-```bash
-# Python side (uploading the trained model to Hugging Face)
-export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-sgambit export --hf legacyaravind/shannons-gambit --model runs/supervised/model.pt
-
-# Web side: web/.env.local  (copy from web/.env.example)
-HF_ENDPOINT_URL=https://<your-endpoint>.endpoints.huggingface.cloud
-HF_API_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-HF_MODEL_ID=legacyaravind/shannons-gambit
-```
-
-On Vercel, set the three `HF_*` web variables under **Project → Settings →
-Environment Variables**. No GitHub Actions secrets are required for CI (tests run
-fully offline). **Never commit real tokens** - `.env.local` is gitignored.
-
----
+- **Certified 2000+ Elo is not produced on a laptop CPU.** It needs GPU-scale training
+  on real strong-player data plus a Stockfish anchor; the job and evaluator are provided.
+- Self-play loss falls cleanly, but *objective* strength gains per generation are small and
+  noisy on a few CPU minutes (a gauntlet found ~zero gen↔Elo correlation at that budget).
+- Without a Stockfish binary, the ladder Elo is **relative** (anchored to a random baseline),
+  not a FIDE/Lichess-calibrated number.
+- Personal fine-tuning is light and KL-regularized — it nudges style, not a rebuild.
 
 ## License
 
-[Apache-2.0](LICENSE). Trained weights are released under the same licence with a
-model card on the Hugging Face Hub.
-
-<div align="center">
-<sub>Built with python-chess, PyTorch, Next.js, and a lot of Bellman backups.</sub>
-</div>
+[Apache-2.0](LICENSE). Trained weights are released on the Hugging Face Hub under the same licence.

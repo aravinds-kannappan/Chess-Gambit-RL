@@ -17,12 +17,13 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Shannon&apos;s <span>Gambit</span>
           </Link>
           <Link href="/play" className="link">Play</Link>
-          <Link href="/analysis" className="link">Information</Link>
+          <Link href="/watch" className="link">Watch</Link>
           <Link href="/predict" className="link">Predict</Link>
-          <Link href="/arena" className="link">Arena</Link>
+          <Link href="/research" className="link">Research</Link>
+          <Link href="/arena" className="link">Ladder</Link>
           <span style={{ flex: 1 }} />
           <a
-            href="https://github.com"
+            href="https://github.com/aravinds-kannappan/Chess-Gambit-RL"
             className="link"
             target="_blank"
             rel="noreferrer"

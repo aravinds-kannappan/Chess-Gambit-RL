@@ -16,6 +16,31 @@ def expected_score(r_i: float, r_j: float) -> float:
     return 1.0 / (1.0 + BASE ** ((r_j - r_i) / SCALE))
 
 
+def estimate_rating(results: list[tuple[float, float, int]], *,
+                    init: float = 1000.0, iters: int = 200, lr: float = 400.0) -> float:
+    """Estimate one player's Elo against fixed-rating anchors (1-D logistic MLE).
+
+    ``results`` is a list of ``(anchor_elo, score, games)`` where ``score`` is the
+    player's total points (win=1, draw=0.5) over ``games`` games vs. that anchor.
+    Because the anchors are held fixed (e.g. a random agent pinned to a known Elo
+    plus prior generations), the returned rating is on a *stable absolute scale*
+    comparable across generations. Gradient ascent on the Bradley-Terry log-likelihood.
+    """
+    total_games = sum(g for _, _, g in results)
+    if total_games == 0:
+        return init
+    r = init
+    for _ in range(iters):
+        grad = 0.0
+        for anchor_elo, score, games in results:
+            if games == 0:
+                continue
+            grad += score - games * expected_score(r, anchor_elo)
+        r += lr * grad / total_games
+        r = max(0.0, min(4000.0, r))
+    return float(round(r, 1))
+
+
 def fit_elo(
     names: list[str],
     score_matrix: np.ndarray,
