@@ -1,0 +1,8 @@
+# GitHub Linguist counts bytes per language. The executed notebook embeds
+# base64 PNG graphs + cell outputs, so it is large and would otherwise dominate
+# the repo's language bar. Mark notebooks as documentation so the language
+# stats reflect the actual source (Python + TypeScript).
+*.ipynb linguist-documentation
+
+# Keep generated/exported web data out of the language stats too.
+web/public/data/*.json linguist-generated
