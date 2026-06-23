@@ -9,6 +9,7 @@ wrapper around this.
 
 from __future__ import annotations
 
+import random
 from functools import lru_cache
 from pathlib import Path
 
@@ -86,10 +87,12 @@ class ModelServer:
             raise RuntimeError("no checkpoints available; call ensure_seeded()")
         model = self._model(entry.gen)
         gap = target_elo - entry.elo
-        sims, temperature, blunder = self.base_sims, 0.0, 0.0
+        # A light temperature even at full strength so games are not identical
+        # every time (MCTS with no root noise is otherwise deterministic).
+        sims, temperature, blunder = self.base_sims, 0.35, 0.0
         if gap < -50:  # weaker than this snapshot
             blunder = min(0.6, -gap / 800.0)
-            temperature = 0.6
+            temperature = 0.7
             sims = max(8, self.base_sims // 2)
         elif gap > 50:  # stronger
             sims = self.base_sims * 2
@@ -98,7 +101,11 @@ class ModelServer:
         return agent, entry
 
     # --- request handlers --------------------------------------------------
-    def move(self, fen: str, *, elo: float | None = None, seed: int = 0) -> dict:
+    def move(self, fen: str, *, elo: float | None = None, seed: int | None = None) -> dict:
+        # A fresh random seed per call so stochastic move selection actually
+        # varies -- otherwise every game is a deterministic replay.
+        if seed is None:
+            seed = random.randrange(1, 2**31)
         board = chess.Board(fen)
         best = self.ladder.best()
         target = elo if elo is not None else (best.elo if best else 1000)
@@ -106,10 +113,10 @@ class ModelServer:
         mv = agent.select_move(board)
         return {"move": mv.uci(), "gen": entry.gen, "elo": entry.elo, "source": "model"}
 
-    def watch_move(self, fen: str, white_elo: float, black_elo: float, *, seed: int = 0) -> dict:
+    def watch_move(self, fen: str, white_elo: float, black_elo: float) -> dict:
         board = chess.Board(fen)
         target = white_elo if board.turn == chess.WHITE else black_elo
-        return self.move(fen, elo=target, seed=seed)
+        return self.move(fen, elo=target)
 
     def predict(self, fen: str) -> dict:
         best = self.ladder.best() or self.ladder.latest()
