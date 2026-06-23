@@ -262,7 +262,7 @@ Keys only unlock the *hosted* paths:
 ```bash
 # Python side (uploading the trained model to Hugging Face)
 export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxx
-sgambit export --hf aravinds-kannappan/shannons-gambit --model runs/supervised/model.pt
+sgambit export --hf legacyaravind/shannons-gambit --model runs/supervised/model.pt
 
 # Web side: web/.env.local  (copy from web/.env.example)
 HF_ENDPOINT_URL=https://<your-endpoint>.endpoints.huggingface.cloud
