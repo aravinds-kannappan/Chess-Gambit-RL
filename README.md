@@ -257,7 +257,7 @@ Keys only unlock the *hosted* paths:
 | `HF_TOKEN` | shell env (Python) | `sgambit export --hf` to upload weights to the Hugging Face Hub | https://huggingface.co/settings/tokens (a *write* token) |
 | `HF_ENDPOINT_URL` | `web/.env.local` & Vercel env | The web app proxying the trained model for play/predict | URL of your deployed [HF Inference Endpoint](https://ui.endpoints.huggingface.co/) serving the model |
 | `HF_API_TOKEN` | `web/.env.local` & Vercel env | Auth for the above endpoint (if private) | https://huggingface.co/settings/tokens (a *read* token) |
-| `HF_MODEL_ID` | `web/.env.local` & Vercel env | Display / model card link | e.g. `aravinds-kannappan/shannons-gambit` |
+| `HF_MODEL_ID` | `web/.env.local` & Vercel env | Display / model card link | e.g. `legacyaravind/shannons-gambit` |
 
 ```bash
 # Python side (uploading the trained model to Hugging Face)
