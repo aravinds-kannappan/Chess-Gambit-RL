@@ -1,0 +1,5 @@
+torch>=2.3
+python-chess>=1.11
+numpy>=1.26
+# Reuse the exact encoding + model code from the published package.
+shannons-gambit @ git+https://github.com/aravinds-kannappan/Chess-Gambit-RL.git
