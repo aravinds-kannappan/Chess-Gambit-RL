@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.ruff_cache/
+.pytest_cache/
+
+# Project outputs
+data/
+runs/
+*.pt
+*.pth
+*.parquet
+*.npz
+*.onnx
+
+# Notebooks
+.ipynb_checkpoints/
+
+# Web
+web/node_modules/
+web/.next/
+web/out/
+web/.vercel/
+web/.env.local
+
+# OS
+.DS_Store
