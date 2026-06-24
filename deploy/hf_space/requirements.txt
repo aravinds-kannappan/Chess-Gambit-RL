@@ -8,4 +8,4 @@ huggingface_hub>=0.23
 # The full RL/serving package (encoding, MCTS, continual trainer, server).
 # Pinned to a commit so a Space rebuild always installs the intended code and
 # busts the Docker/pip cache (bump this hash when the package changes).
-shannons-gambit @ git+https://github.com/aravinds-kannappan/Chess-Gambit-RL.git@ee0cfda4c8dbb3728044af6f4230fbedeec2bc7a
+shannons-gambit @ git+https://github.com/aravinds-kannappan/Chess-Gambit-RL.git@04daf17e3cf1d2df8445541503dbbf29c567111b
