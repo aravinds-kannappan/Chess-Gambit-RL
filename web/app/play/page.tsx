@@ -21,6 +21,9 @@ export default function PlayPage() {
   const [source, setSource] = useState("");
   const [adaptInfo, setAdaptInfo] = useState<string>("");
   const [history, setHistory] = useState<number[]>([]);
+  const [competitive, setCompetitive] = useState(false);
+  const [userElo, setUserElo] = useState(1200);
+  const targetElo = competitive ? 2300 : userElo;
 
   useEffect(() => {
     setHistory(JSON.parse(localStorage.getItem("sg_winrates") || "[]"));
@@ -43,7 +46,7 @@ export default function PlayPage() {
     try {
       const res = await fetch("/api/move", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fen: fenBefore, session }),
+        body: JSON.stringify({ fen: fenBefore, session, elo: targetElo }),
       });
       const data = await res.json();
       if (!res.ok || data.error) {
@@ -60,7 +63,7 @@ export default function PlayPage() {
     } catch {
       setStatus("Backend unreachable.");
     }
-  }, [game, session, logIfOver]);
+  }, [game, session, logIfOver, targetElo]);
 
   const onDrop = useCallback((from: string, to: string) => {
     try {
@@ -110,6 +113,34 @@ export default function PlayPage() {
             on how you play.
           </p>
           <p className="pill">last move source: <span className={source === "personal" ? "tag-hf" : "tag-fallback"}>{source || "-"}</span></p>
+
+          <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <b>Competitive mode</b>
+              <span
+                className={`toggle ${competitive ? "on" : ""}`}
+                onClick={() => setCompetitive((v) => !v)}
+                role="button"
+                tabIndex={0}
+              >
+                {competitive ? "🔥 Tournament" : "🤝 Adaptive"}
+              </span>
+            </div>
+            {competitive ? (
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                The agent plays at full tournament strength (~2300) - no mercy, no
+                adapting down. Train here to prepare for real competition.
+              </p>
+            ) : (
+              <div style={{ marginTop: "0.5rem" }}>
+                <label className="muted">Match my level: <b>{userElo} Elo</b></label>
+                <input type="range" min={600} max={2200} step={50} value={userElo}
+                  onChange={(e) => setUserElo(Number(e.target.value))} style={{ width: "100%" }} />
+                <p className="muted">The agent meets you at your level and adapts as you improve.</p>
+              </div>
+            )}
+          </div>
+
           <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
             <button className="btn" onClick={newGame}>New game</button>
             <button className="btn secondary" onClick={retrain}>Retrain on my games</button>

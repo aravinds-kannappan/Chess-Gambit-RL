@@ -3,10 +3,12 @@ FROM python:3.11-slim
 
 ENV PYTHONUNBUFFERED=1 \
     MODELS_DIR=/data/models \
-    TRAIN_ENABLED=1
+    TRAIN_ENABLED=1 \
+    STOCKFISH_PATH=/usr/games/stockfish
 
 WORKDIR /app
-RUN apt-get update && apt-get install -y --no-install-recommends git && \
+# git: pip-install the package from GitHub; stockfish: reliable Elo-matched opponents.
+RUN apt-get update && apt-get install -y --no-install-recommends git stockfish && \
     rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

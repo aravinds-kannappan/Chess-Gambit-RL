@@ -106,6 +106,38 @@ class DQNConfig:
 
 
 @dataclass(frozen=True)
+class PPOConfig:
+    """Proximal Policy Optimization (actor-critic) on an endgame MDP.
+
+    PPO is trained where we hold exact ground truth (the solved value table), so
+    its conversion rate can be validated against optimal play -- the on-policy
+    counterpart to the off-policy DQN ``reward`` agent.
+    """
+
+    endgame: str = "KRvK"
+    run_dir: str = "runs/ppo"
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip: float = 0.2
+    lr: float = 3e-4
+    rollout_steps: int = 1_024     # transitions collected per update
+    minibatch_size: int = 256
+    update_epochs: int = 4         # PPO epochs over each rollout
+    total_updates: int = 200
+    value_coef: float = 0.5
+    entropy_coef: float = 0.01
+    max_grad_norm: float = 0.5
+    channels: int = 32
+    max_plies: int = 60
+    # Curriculum: cap the mate distance of start states (matches the DQN setup so
+    # the two RL agents are validated on the same well-defined sub-task).
+    max_train_dtm: int = 6
+    shaping: bool = True           # potential-based shaping from the exact V*
+    device: str = "auto"
+    seed: int = 0
+
+
+@dataclass(frozen=True)
 class AlphaZeroConfig:
     """Small-but-real AlphaZero-lite self-play training."""
 
@@ -125,6 +157,31 @@ class AlphaZeroConfig:
     epochs_per_iter: int = 2
     buffer_games: int = 200
     device: str = "auto"
+    seed: int = 0
+
+
+@dataclass(frozen=True)
+class StockfishConfig:
+    """The Stockfish **benchmark** reference (never a player for our own agents).
+
+    Used by the backend evaluator as a calibrated yardstick: an Elo-throttled
+    reference opponent for gauntlets and a per-position scorer for centipawn-loss.
+    Above ``uci_elo_floor`` we use the engine's own ``UCI_LimitStrength`` +
+    ``UCI_Elo`` calibration; below it (where ``UCI_Elo`` bottoms out) we drop to
+    ``Skill Level`` with a shallow search so weak bands are still believable.
+    """
+
+    elo: int = 1500
+    # Per-move search budget. ``movetime_ms`` (if > 0) caps wall-clock per move;
+    # ``depth`` caps search depth. At least one keeps weak levels fast and cheap.
+    depth: int = 0          # 0 -> no explicit depth cap (rely on Elo throttle)
+    movetime_ms: int = 50
+    threads: int = 1
+    hash_mb: int = 16
+    # Engine's supported UCI_Elo window (Stockfish reports min 1320 historically;
+    # queried/clamped at runtime, these are conservative defaults).
+    uci_elo_floor: int = 1320
+    uci_elo_ceiling: int = 3190
     seed: int = 0
 
 

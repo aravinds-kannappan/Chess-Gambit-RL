@@ -16,17 +16,26 @@
 
 ## What it is
 
-An end-to-end chess RL system that **owns the whole pipeline**: it pre-trains on
-real Lichess games, improves by **continuous AlphaZero-style self-play**, versions
-every generation on an **Elo ladder**, **adapts to how you play**, and serves it all
-from a **Hugging Face Space that both trains and serves** — with **no heuristic
-fallback**. The Next.js site is a thin client over that backend.
+An end-to-end chess RL system that **owns the whole pipeline**. It is a
+**multi-agent** engine: each position is routed to the method that owns it — exact
+**MDP/Bellman** dynamic programming in solved endgames, **PPO** and **reward (DQN)**
+RL in the low-material regime, and an AlphaZero-lite **neural net** for the opening
+and middlegame (`agents/router.py`). It pre-trains on real Lichess games, improves
+by **continuous self-play**, **adapts to how you play**, and serves it all from a
+**Hugging Face Space that both trains and serves** — with **no heuristic fallback**.
+
+**Stockfish is the referee, never a player.** The agents never call Stockfish to
+choose a move. A separate backend evaluator (`eval/benchmark.py`) uses Stockfish
+purely as a calibrated yardstick: it scores each agent's **centipawn loss** and
+top-1 agreement, and assigns a **calibrated Elo** via gauntlets against Elo-throttled
+Stockfish. That rating is the level each agent plays at — and climbs as it learns.
 
 | Surface | What it does |
 | --- | --- |
-| **Play** | Play the trained network; your games train a *personal* checkpoint that adapts to your style (press Retrain to fine-tune it). |
-| **Watch** | Pair two agents at chosen **Elo** levels and watch them play; the backend serves the nearest ladder snapshot tuned to each strength. |
-| **Research** | Live training graphs: Elo per self-play generation, falling loss curves, and the information-theoretic analysis of real games. |
+| **Play** | Play the routed agent; it **adapts to your level**, your games fine-tune a *personal* checkpoint, and **Competitive Mode** cranks it to ~2300 tournament strength. |
+| **Tiers** | Many agent-vs-agent games at once across **Elo tiers**; each finished game is fresh training data for the ladder. |
+| **Watch** | Pair two agents at chosen **Elo** levels and watch a single game. |
+| **Dashboard** | Live training graphs: Elo per generation, Stockfish-assessed ratings, falling loss curves, and the information-theoretic analysis of real games. |
 | **Predict** | FEN/PGN → win/draw/loss, best move, value, from the current best network. |
 | **Ladder** | Every self-play generation as a rated checkpoint. |
 
@@ -43,7 +52,11 @@ Genuine playing strength comes from two things this project is honest about:
    TPU-hours* — strength scales with compute and data.
 
 **On the Elo number:** a meaningful "2000 Elo" must be **anchored to a calibrated
-reference** (Stockfish at known skill levels) — see `shannons_gambit/eval/stockfish_ref.py`.
+reference**. Stockfish is that reference and *only* that — the agents never use it to
+play. `eval/benchmark.py` throttles Stockfish to known Elo bands (`UCI_LimitStrength`
++ `UCI_Elo`, with a `Skill Level` fallback below the floor), plays each agent a
+gauntlet, and fits its rating (Bradley-Terry MLE in `eval/elo.py`); it also reports
+centipawn loss and top-1 agreement per agent. Run it with `sgambit benchmark`.
 Without that anchor, any Elo is only relative. The repo ships:
 
 - the pre-training pipeline on real strong-player Lichess data,

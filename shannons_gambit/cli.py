@@ -107,6 +107,26 @@ def _cmd_ladder(args: argparse.Namespace) -> None:
     print(json.dumps({"levels": ladder.levels(), "elo_curve": ladder.elo_curve()}, indent=2))
 
 
+def _cmd_benchmark(args: argparse.Namespace) -> None:
+    from .agents.random_agent import RandomAgent
+    from .agents.stockfish import find_stockfish
+    from .eval.benchmark import benchmark_suite
+
+    if find_stockfish(args.path) is None:
+        print(json.dumps({"error": "no Stockfish binary; set $STOCKFISH_PATH or install it"}))
+        return
+
+    agents = {"random": RandomAgent()}
+    if Path(args.model).exists():
+        from .agents.neural import NeuralAgent
+
+        agents["neural"] = NeuralAgent.from_checkpoint(args.model, device="cpu")
+    report = benchmark_suite(
+        agents, n_positions=args.positions, elo_games=args.games,
+        movetime_ms=args.movetime, path=args.path)
+    print(json.dumps(report, indent=2))
+
+
 def _cmd_analyze(args: argparse.Namespace) -> None:
     from . import reports
     from .data.dataset import load_records
@@ -224,6 +244,14 @@ def main(argv: list[str] | None = None) -> None:
     lc = sub.add_parser("ladder", help="print the checkpoint ladder (Elo per generation)")
     lc.add_argument("--run-dir", default="runs/continual", dest="run_dir")
     lc.set_defaults(func=_cmd_ladder)
+
+    bm = sub.add_parser("benchmark", help="score agents vs Stockfish (Elo + centipawn loss)")
+    bm.add_argument("--model", default="runs/supervised/model.pt", help="neural checkpoint")
+    bm.add_argument("--positions", type=int, default=200)
+    bm.add_argument("--games", type=int, default=8, help="games per Elo anchor")
+    bm.add_argument("--movetime", type=int, default=50, help="Stockfish ms per move")
+    bm.add_argument("--path", default=None, help="explicit Stockfish binary path")
+    bm.set_defaults(func=_cmd_benchmark)
 
     a = sub.add_parser("analyze", help="information-theory report over the data")
     a.add_argument("--data", default="data")
