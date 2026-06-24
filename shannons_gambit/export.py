@@ -3,9 +3,14 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 WEB_DATA_DIR = Path("web/public/data")
+
+# Generation checkpoints live in their own folder on the Hub so they do not
+# clutter the repo root (which keeps the model card, ladder.json, handler, etc.).
+CKPT_DIR = "checkpoints"
 
 
 # --- Hub persistence for the continuous-training ladder --------------------
@@ -14,7 +19,8 @@ def push_ladder_to_hub(repo_id: str, run_dir: str, *, keep_last: int = 12) -> st
     """Upload ladder.json + recent generation checkpoints to a HF model repo.
 
     The Hub is the durable store, so a free Space with ephemeral disk loses nothing
-    on restart. Only the most recent ``keep_last`` checkpoints are kept hot.
+    on restart. Only the most recent ``keep_last`` checkpoints are kept hot, and
+    they are uploaded under ``checkpoints/`` to keep the repo root tidy.
     """
     from huggingface_hub import HfApi, create_repo
 
@@ -26,13 +32,16 @@ def push_ladder_to_hub(repo_id: str, run_dir: str, *, keep_last: int = 12) -> st
         api.upload_file(path_or_fileobj=str(ladder), path_in_repo="ladder.json", repo_id=repo_id)
     ckpts = sorted(run.glob("gen-*.pt"))[-keep_last:]
     for ck in ckpts:
-        api.upload_file(path_or_fileobj=str(ck), path_in_repo=ck.name, repo_id=repo_id)
+        api.upload_file(
+            path_or_fileobj=str(ck), path_in_repo=f"{CKPT_DIR}/{ck.name}", repo_id=repo_id)
     return f"https://huggingface.co/{repo_id}"
 
 
 def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
     """Download ladder.json + its checkpoints from a HF model repo into ``run_dir``.
 
+    Checkpoints are read from ``checkpoints/`` (falling back to the repo root for
+    older layouts) and flattened into ``run_dir`` so the server finds them by name.
     Returns True if a ladder was found. Best-effort; returns False on any failure.
     """
     from huggingface_hub import hf_hub_download
@@ -46,10 +55,16 @@ def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
     data = json.loads(Path(ladder_path).read_text())
     for gen in data.get("generations", []):
         name = f"{gen['name']}.pt"
-        try:
-            hf_hub_download(repo_id, name, local_dir=str(run))
-        except Exception:
-            continue
+        for repo_path in (f"{CKPT_DIR}/{name}", name):  # new layout, then legacy
+            try:
+                fp = Path(hf_hub_download(repo_id, repo_path, local_dir=str(run)))
+            except Exception:
+                continue
+            target = run / name
+            if fp != target:  # flatten checkpoints/<name>.pt -> <name>.pt
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(fp), str(target))
+            break
     return True
 
 

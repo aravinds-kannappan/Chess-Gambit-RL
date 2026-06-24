@@ -11,7 +11,8 @@ export default function PredictPage() {
   useGameVersion(); // re-render as the live game advances
   const [mode, setMode] = useState<"live" | "custom">("live");
   const [customFen, setCustomFen] = useState(START_FEN);
-  const [wdl, setWdl] = useState<{ win: number; draw: number; loss: number } | null>(null);
+  type Pred = { bestMove: string; wdl: { win: number; draw: number; loss: number }; rating: number; value: number };
+  const [pred, setPred] = useState<Pred | null>(null);
 
   const liveFen = gameStore.fen();
   const fen = mode === "live" ? liveFen : customFen;
@@ -19,16 +20,23 @@ export default function PredictPage() {
   const recs: Rec[] = useMemo(() => recommend(fen, 5, 3), [fen]);
   const evalP = useMemo(() => evalPawns(fen), [fen]);
 
-  // Best-effort WDL from the trained network (no-op if backend warming up).
+  // Trained-network prediction for this position (no-op if backend warming up).
   useEffect(() => {
     let on = true;
-    setWdl(null);
+    setPred(null);
     fetch("/api/predict", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fen }),
     }).then((r) => r.json()).then((d) => {
       const w = d?.wdl ?? d;
-      if (on && w && typeof w.win === "number") setWdl({ win: w.win, draw: w.draw, loss: w.loss });
+      if (on && w && typeof w.win === "number") {
+        setPred({
+          bestMove: d.best_move ?? d.bestMove ?? "",
+          wdl: { win: w.win, draw: w.draw, loss: w.loss },
+          rating: d.rating ?? 0,
+          value: d.value ?? 0,
+        });
+      }
     }).catch(() => {});
     return () => { on = false; };
   }, [fen]);
@@ -98,21 +106,31 @@ export default function PredictPage() {
           </div>
 
           <div className="card">
-            <b>Outcome (trained network)</b>
-            {wdl ? (
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <b>Trained network</b>
+              <span className={`badge ${pred ? "live" : ""}`}>{pred ? "live" : "warming"}</span>
+            </div>
+            {pred ? (
               <>
+                {pred.bestMove && (
+                  <p style={{ margin: "0.6rem 0 0.2rem" }}>
+                    best move <span className="mono" style={{ color: "var(--accent)", fontSize: "1.2rem" }}>{pred.bestMove}</span>
+                    {pred.rating ? <span className="pill"> · plays like ~{Math.round(pred.rating)} Elo</span> : null}
+                  </p>
+                )}
                 <div className="bar" style={{ marginTop: "0.6rem", height: 12 }}>
-                  <span style={{ width: `${wdl.win * 100}%`, background: "var(--win)" }} />
-                  <span style={{ width: `${wdl.draw * 100}%`, background: "var(--draw)" }} />
-                  <span style={{ width: `${wdl.loss * 100}%`, background: "var(--loss)" }} />
+                  <span style={{ width: `${pred.wdl.win * 100}%`, background: "var(--win)" }} />
+                  <span style={{ width: `${pred.wdl.draw * 100}%`, background: "var(--draw)" }} />
+                  <span style={{ width: `${pred.wdl.loss * 100}%`, background: "var(--loss)" }} />
                 </div>
                 <p className="muted" style={{ marginTop: "0.5rem" }}>
-                  win {Math.round(wdl.win * 100)}% · draw {Math.round(wdl.draw * 100)}% · loss {Math.round(wdl.loss * 100)}%
+                  win {Math.round(pred.wdl.win * 100)}% · draw {Math.round(pred.wdl.draw * 100)}% · loss {Math.round(pred.wdl.loss * 100)}%
                 </p>
               </>
             ) : (
               <p className="muted" style={{ marginTop: "0.5rem" }}>
-                Backend warming up - showing the offline engine&apos;s recommendations above.
+                Backend warming up - the recommendations above come from the offline engine.
+                Once the Space is live, the trained network&apos;s best move and outcome show here.
               </p>
             )}
           </div>
