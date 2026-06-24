@@ -73,10 +73,31 @@ export default function DashboardPage() {
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: "1.2rem" }}>
+        <div className="card stat"><div className="num">{peak != null ? Math.round(peak) : "-"}</div><div className="label">Peak Elo</div></div>
         <div className="card stat"><div className="num">{ladder?.generations ?? "-"}</div><div className="label">Generations</div></div>
-        <div className="card stat"><div className="num">{curve.length ? Math.round(curve[curve.length - 1].elo) : "-"}</div><div className="label">Latest Elo</div></div>
         <div className="card stat"><div className="num">{ladder?.elo_curve?.find((r) => r.acpl != null)?.acpl ?? "-"}</div><div className="label">Centipawn loss</div></div>
         <div className="card stat"><div className="num">{miData.length ? miData[0].mi.toFixed(2) : "-"}</div><div className="label">Top feature MI (bits)</div></div>
+      </div>
+
+      <div className="card" style={{ marginBottom: "1.2rem" }}>
+        <h2>Training pipeline</h2>
+        <div className="grid cols-3" style={{ marginTop: "0.6rem" }}>
+          {[
+            { n: "01", t: "Pre-train", d: "Behavioural cloning on real Lichess games.", tag: "pretrain/model.pt" },
+            { n: "02", t: "Post-train", d: "Self-play RL refines it, generation by generation.", tag: "posttrain/gen-*.pt" },
+            { n: "03", t: "Serve & grade", d: "Best net scaled to your Elo; Stockfish grades it.", tag: "/move · /calibrate" },
+          ].map((s, i) => (
+            <div key={s.n} style={{ position: "relative", padding: "0.4rem 0.2rem" }}>
+              <div className="row" style={{ gap: "0.5rem" }}>
+                <span className="mono" style={{ color: "var(--accent2)" }}>{s.n}</span>
+                <b>{s.t}</b>
+                {i < 2 && <span className="muted" style={{ marginLeft: "auto" }}>→</span>}
+              </div>
+              <p className="muted" style={{ margin: "0.3rem 0 0.4rem" }}>{s.d}</p>
+              <span className="chip mono" style={{ fontSize: "0.75rem" }}>{s.tag}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       <div className="card">

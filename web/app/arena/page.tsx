@@ -1,11 +1,22 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
 
-interface Level { gen: number; name: string; elo: number }
-interface Ladder { generations: number; best_elo?: number; calibrated_elo?: number; levels?: Level[] }
+interface Ladder { generations?: number; best_elo?: number; calibrated_elo?: number }
 
-export default function LadderPage() {
+// Playable strength tiers (not a list of training runs). Serving scales the base
+// net to any of these Elos, so each is a level you can actually challenge.
+const TIERS = [
+  { name: "Elite", elo: 2300, ic: "♚", style: "Tournament prep. Punishes every loose move.", color: "#ff8fd0" },
+  { name: "Master", elo: 2000, ic: "♛", style: "Sharp tactics and clean conversion.", color: "#f85149" },
+  { name: "Expert", elo: 1700, ic: "♜", style: "Solid plans, rarely blunders.", color: "#b06dff" },
+  { name: "Club", elo: 1400, ic: "♝", style: "Knows the ideas, makes the odd slip.", color: "#f5a623" },
+  { name: "Casual", elo: 1100, ic: "♞", style: "Plays naturally, forgives mistakes.", color: "#3fb950" },
+  { name: "Novice", elo: 800, ic: "♟", style: "Gentle. A friendly first opponent.", color: "#6db0ff" },
+];
+
+export default function TiersLadderPage() {
   const [data, setData] = useState<Ladder | null>(null);
   const [live, setLive] = useState(false);
 
@@ -14,7 +25,7 @@ export default function LadderPage() {
       try {
         const r = await fetch("/api/ladder");
         const d = await r.json();
-        if (r.ok && d.levels) { setData(d); setLive(true); return; }
+        if (r.ok && !d.error) { setData(d); setLive(true); return; }
       } catch { /* fall through */ }
       try { const s = await fetch("/data/ladder.json"); if (s.ok) setData(await s.json()); } catch { /* none */ }
     };
@@ -23,51 +34,42 @@ export default function LadderPage() {
     return () => clearInterval(t);
   }, []);
 
-  // Showing every generation is useless and laggy. Collapse to a handful of
-  // distinct Elo tiers: keep the strongest checkpoint per ~150-Elo band, cap 8.
-  const all = data?.levels ?? [];
-  const byBand = new Map<number, Level>();
-  for (const lvl of all) {
-    const band = Math.round(lvl.elo / 150);
-    const cur = byBand.get(band);
-    if (!cur || lvl.elo > cur.elo) byBand.set(band, lvl);
-  }
-  const rows = [...byBand.values()].sort((a, b) => a.elo - b.elo).slice(-8);
-  const max = rows.length ? Math.max(...rows.map((r) => r.elo)) : 1;
-  const min = rows.length ? Math.min(...rows.map((r) => r.elo)) : 0;
-  const bestElo = rows.length ? Math.max(...rows.map((r) => r.elo)) : 0;
+  const reach = Math.round(data?.calibrated_elo ?? data?.best_elo ?? 0);
 
   return (
     <main className="container">
-      <h1 className="title" style={{ fontSize: "2rem" }}>The <span>ladder</span></h1>
+      <h1 className="title" style={{ fontSize: "2.1rem" }}>Challenge <span>tiers</span></h1>
       <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 1.4rem" }}>
-        The strongest checkpoint in each Elo band, as distinct tiers (not every
-        generation). {live ? "Live from the training backend." : "Latest published run."}
-        {" "}Graded play scales the best net to your chosen Elo.
+        Pick a level and play. The agent is the strong pre-trained net scaled to that
+        Elo - not a list of training runs. {live && reach ? `Right now it benchmarks around ${reach} Elo.` : ""}
       </p>
 
-      {!data ? (
-        <p className="muted">Loading…</p>
-      ) : rows.length === 0 ? (
-        <div className="card"><p className="muted">No generations yet - the backend is warming up its first checkpoints.</p></div>
-      ) : (
-        <div className="card">
-          <div className="rungs">
-            {rows.map((row) => {
-              const frac = max === min ? 1 : (row.elo - min) / (max - min);
-              const isBest = row.elo === bestElo;
-              return (
-                <div key={row.gen} className={`rung ${isBest ? "best" : ""}`}>
-                  <span className="fill" style={{ width: `${30 + frac * 70}%` }} />
-                  <span className="gen">{row.name}</span>
-                  <span className="elo" style={{ color: isBest ? "var(--accent)" : "var(--text)" }}>{Math.round(row.elo)}</span>
-                  <span className="pill" style={{ marginLeft: "auto" }}>{isBest ? "★ current best" : `gen ${row.gen}`}</span>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      <div className="rungs">
+        {TIERS.map((t) => {
+          const reachable = reach > 0 && reach >= t.elo;
+          return (
+            <div key={t.name} className={`rung ${reachable ? "best" : ""}`}>
+              <span className="fill" style={{ width: `${Math.min(100, (t.elo / 2300) * 100)}%`, background: `linear-gradient(90deg, ${t.color}22, transparent)` }} />
+              <span style={{ fontSize: "1.7rem" }}>{t.ic}</span>
+              <span>
+                <span style={{ fontWeight: 700, color: t.color, fontSize: "1.05rem" }}>{t.name}</span>
+                <span className="elo" style={{ marginLeft: "0.6rem" }}>{t.elo}</span>
+                <div className="muted" style={{ fontSize: "0.85rem" }}>{t.style}</div>
+              </span>
+              <Link href="/play" className="btn secondary" style={{ marginLeft: "auto" }}>Challenge</Link>
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="card" style={{ marginTop: "1.4rem" }}>
+        <h2>How a tier is built</h2>
+        <p className="muted" style={{ margin: 0 }}>
+          One strong network (pre-trained on real games, refined by self-play) is throttled
+          to each tier with search depth and a calibrated blunder rate, then graded by
+          Stockfish so the Elo on the label is real - not a self-reported number.
+        </p>
+      </div>
     </main>
   );
 }
