@@ -8,9 +8,13 @@ from pathlib import Path
 
 WEB_DATA_DIR = Path("web/public/data")
 
-# Generation checkpoints live in their own folder on the Hub so they do not
-# clutter the repo root (which keeps the model card, ladder.json, handler, etc.).
-CKPT_DIR = "checkpoints"
+# The HF model repo mirrors the training pipeline as folders:
+#   pretrain/  -> supervised behavioural-cloning net (the served base, model.pt)
+#   posttrain/ -> self-play RL refinement (the versioned generation checkpoints)
+# keeping the repo root for the model card, ladder.json, handler, requirements.
+PRETRAIN_DIR = "pretrain"
+CKPT_DIR = "posttrain"
+_LEGACY_CKPT_DIRS = ("checkpoints",)  # earlier layouts, still readable
 
 
 # --- Hub persistence for the continuous-training ladder --------------------
@@ -20,7 +24,7 @@ def push_ladder_to_hub(repo_id: str, run_dir: str, *, keep_last: int = 12) -> st
 
     The Hub is the durable store, so a free Space with ephemeral disk loses nothing
     on restart. Only the most recent ``keep_last`` checkpoints are kept hot, and
-    they are uploaded under ``checkpoints/`` to keep the repo root tidy.
+    they are uploaded under ``posttrain/`` (the RL-refinement stage).
     """
     from huggingface_hub import HfApi, create_repo
 
@@ -55,17 +59,38 @@ def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
     data = json.loads(Path(ladder_path).read_text())
     for gen in data.get("generations", []):
         name = f"{gen['name']}.pt"
-        for repo_path in (f"{CKPT_DIR}/{name}", name):  # new layout, then legacy
+        # current layout, then legacy folders, then bare repo root
+        repo_paths = [f"{CKPT_DIR}/{name}", *[f"{d}/{name}" for d in _LEGACY_CKPT_DIRS], name]
+        for repo_path in repo_paths:
             try:
                 fp = Path(hf_hub_download(repo_id, repo_path, local_dir=str(run)))
             except Exception:
                 continue
             target = run / name
-            if fp != target:  # flatten checkpoints/<name>.pt -> <name>.pt
+            if fp != target:  # flatten posttrain/<name>.pt -> <name>.pt
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(fp), str(target))
             break
     return True
+
+
+def pull_base_model(repo_id: str, run_dir: str) -> str | None:
+    """Download the served base net (pretrain/model.pt, legacy root model.pt)."""
+    from huggingface_hub import hf_hub_download
+
+    run = Path(run_dir)
+    run.mkdir(parents=True, exist_ok=True)
+    for repo_path in (f"{PRETRAIN_DIR}/model.pt", "model.pt"):
+        try:
+            fp = Path(hf_hub_download(repo_id, repo_path, local_dir=str(run)))
+        except Exception:
+            continue
+        target = run / "model.pt"
+        if fp != target:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(fp), str(target))
+        return str(target)
+    return None
 
 
 def write_web_data(payloads: dict[str, dict], *, out_dir: str | Path = WEB_DATA_DIR) -> list[str]:
@@ -84,13 +109,15 @@ HF_ENDPOINT_DIR = Path(__file__).resolve().parent.parent / "deploy" / "hf_endpoi
 
 
 def push_model_to_hf(repo_id: str, model_path: str, *, card: str | None = None,
-                     private: bool = False, with_handler: bool = True) -> str:
+                     private: bool = False, with_handler: bool = True,
+                     dest: str | None = None) -> str:
     """Upload a checkpoint (+ card + Inference Endpoint handler) to the HF Hub.
 
     Requires ``huggingface_hub`` and a logged-in token (``huggingface-cli login``
-    or ``HF_TOKEN``). When ``with_handler`` is set, also uploads ``handler.py``
-    and ``requirements.txt`` from ``deploy/hf_endpoint/`` so the repo can be
-    served as a custom Inference Endpoint. Returns the repo URL.
+    or ``HF_TOKEN``). ``dest`` sets the path in the repo (e.g. ``pretrain/model.pt``);
+    defaults to the file's name at the root. When ``with_handler`` is set, also
+    uploads ``handler.py`` and ``requirements.txt`` from ``deploy/hf_endpoint/``
+    so the repo can be served as a custom Inference Endpoint. Returns the repo URL.
     """
     from huggingface_hub import HfApi, create_repo
 
@@ -98,7 +125,7 @@ def push_model_to_hf(repo_id: str, model_path: str, *, card: str | None = None,
     api = HfApi()
     api.upload_file(
         path_or_fileobj=model_path,
-        path_in_repo=Path(model_path).name,
+        path_in_repo=dest or Path(model_path).name,
         repo_id=repo_id,
     )
     if card:

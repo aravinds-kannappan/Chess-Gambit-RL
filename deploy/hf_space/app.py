@@ -74,14 +74,15 @@ async def lifespan(app: FastAPI):
             server.reload()
         except Exception:  # noqa: BLE001
             pass
-        # Serve from the strong pre-trained net (model.pt), scaled to the target
-        # Elo, instead of weak self-play generations. This is what makes graded
-        # play actually track the requested Elo.
+        # Serve from the strong pre-trained net (pretrain/model.pt), scaled to the
+        # target Elo, instead of weak self-play generations. This is what makes
+        # graded play actually track the requested Elo.
         try:
-            from huggingface_hub import hf_hub_download
+            from shannons_gambit.export import pull_base_model
 
-            base = hf_hub_download(HF_MODEL_REPO, "model.pt", local_dir=MODELS_DIR)
-            server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
+            base = pull_base_model(HF_MODEL_REPO, MODELS_DIR)
+            if base:
+                server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
         except Exception as exc:  # noqa: BLE001
             print("base model load skipped:", exc, flush=True)
     server.ensure_seeded()

@@ -24,7 +24,10 @@ from shannons_gambit.models.prediction import Predictor
 
 class EndpointHandler:
     def __init__(self, path: str = "") -> None:
-        model_path = os.path.join(path, "model.pt")
+        # The served base net lives under pretrain/ (supervised behavioural
+        # cloning); fall back to the legacy repo-root location.
+        candidates = [os.path.join(path, "pretrain", "model.pt"), os.path.join(path, "model.pt")]
+        model_path = next((p for p in candidates if os.path.exists(p)), candidates[-1])
         self.predictor = Predictor.from_checkpoint(model_path, device="cpu")
 
     def __call__(self, data: dict[str, Any]) -> dict[str, Any]:

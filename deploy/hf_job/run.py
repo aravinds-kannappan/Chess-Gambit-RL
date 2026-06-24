@@ -64,11 +64,11 @@ def main() -> None:
                                   device="auto"), args.selfplay_gens)
     print("elo curve:", res["elo_curve"], flush=True)
 
-    # 4) publish: the improved pre-trained net is the served base (model.pt),
-    #    plus the self-play ladder + checkpoints (under checkpoints/).
-    print("== pushing base model + ladder to the Hub ==", flush=True)
-    print(push_model_to_hf(args.hf_repo, "runs/supervised/model.pt", with_handler=False),
-          flush=True)
+    # 4) publish the pipeline as folders: pretrain/ (supervised base, served) and
+    #    posttrain/ (self-play RL generations), plus ladder.json at the root.
+    print("== pushing pretrain/ base model + posttrain/ ladder to the Hub ==", flush=True)
+    print(push_model_to_hf(args.hf_repo, "runs/supervised/model.pt",
+                           dest="pretrain/model.pt", with_handler=False), flush=True)
     print(push_ladder_to_hub(args.hf_repo, "runs/continual"), flush=True)
 
 
