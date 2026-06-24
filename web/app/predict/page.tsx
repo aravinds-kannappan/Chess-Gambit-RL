@@ -1,115 +1,123 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Chessboard } from "react-chessboard";
+import { recommend, evalPawns, type Rec } from "@/app/lib/engine";
+import { gameStore, useGameVersion } from "@/app/lib/game";
 
-interface PredictResult {
-  bestMove: string;
-  wdl: { win: number; draw: number; loss: number };
-  value: number;
-  rating: number;
-  policyEntropyBits: number;
-  source: string;
-  error?: string;
-}
-
-const START = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
+const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
 
 export default function PredictPage() {
-  const [input, setInput] = useState(START);
-  const [result, setResult] = useState<PredictResult | null>(null);
-  const [loading, setLoading] = useState(false);
+  useGameVersion(); // re-render as the live game advances
+  const [mode, setMode] = useState<"live" | "custom">("live");
+  const [customFen, setCustomFen] = useState(START_FEN);
+  const [wdl, setWdl] = useState<{ win: number; draw: number; loss: number } | null>(null);
 
-  const run = async () => {
-    setLoading(true);
-    setResult(null);
-    const isPgn = input.includes("1.") || input.includes("\n");
-    const body = isPgn ? { pgn: input } : { fen: input.trim() };
-    try {
-      const res = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const d = await res.json();
-      if (!res.ok || d.error) {
-        setResult({ error: d.error === "backend warming up" ? "Backend warming up - try again shortly." : (d.error ?? "error") } as PredictResult);
-      } else {
-        // Normalize the Space's snake_case response.
-        setResult({
-          bestMove: d.best_move ?? d.bestMove ?? "",
-          wdl: d.wdl ?? { win: 0, draw: 0, loss: 0 },
-          value: d.value ?? 0,
-          rating: d.rating ?? 0,
-          policyEntropyBits: d.policy_entropy_bits ?? 0,
-          source: d.source ?? "model",
-        });
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  const liveFen = gameStore.fen();
+  const fen = mode === "live" ? liveFen : customFen;
 
-  const pct = (x: number) => `${(x * 100).toFixed(1)}%`;
+  const recs: Rec[] = useMemo(() => recommend(fen, 5, 3), [fen]);
+  const evalP = useMemo(() => evalPawns(fen), [fen]);
+
+  // Best-effort WDL from the trained network (no-op if backend warming up).
+  useEffect(() => {
+    let on = true;
+    setWdl(null);
+    fetch("/api/predict", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fen }),
+    }).then((r) => r.json()).then((d) => {
+      const w = d?.wdl ?? d;
+      if (on && w && typeof w.win === "number") setWdl({ win: w.win, draw: w.draw, loss: w.loss });
+    }).catch(() => {});
+    return () => { on = false; };
+  }, [fen]);
+
+  const turn = fen.split(" ")[1] === "w" ? "White" : "Black";
+  const lo = recs.length ? recs[recs.length - 1].score : 0;
+  const span = recs.length ? Math.max(0.6, recs[0].score - lo) : 1;
+  const whiteHeight = Math.round(((Math.max(-6, Math.min(6, evalP)) + 6) / 12) * 100);
 
   return (
     <main className="container">
-      <h1 className="title">Live prediction</h1>
-      <p className="subtitle">
-        Paste a FEN or PGN to get win/draw/loss, the best move, and an estimated
-        player rating from the prediction model.
-      </p>
-
-      <div className="card">
-        <textarea
-          className="fen"
-          rows={3}
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-        />
-        <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem" }}>
-          <button className="btn" onClick={run} disabled={loading}>
-            {loading ? "Predicting…" : "Predict"}
-          </button>
-          <button className="btn secondary" onClick={() => setInput(START)}>
-            Reset to start
-          </button>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+        <h1 className="title" style={{ fontSize: "2rem" }}>Move <span>recommendations</span></h1>
+        <div className="row">
+          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "live" ? "var(--accent2)" : undefined }}
+            onClick={() => setMode("live")}>Live game</span>
+          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "custom" ? "var(--accent2)" : undefined }}
+            onClick={() => setMode("custom")}>Custom FEN</span>
         </div>
       </div>
+      <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 1.3rem" }}>
+        {mode === "live"
+          ? "Reading your ongoing game - recommendations update with every move, and the game stays put when you switch tabs."
+          : "Paste any position to analyze it on its own."}
+      </p>
 
-      {result && !result.error && (
-        <div className="grid cols-2" style={{ marginTop: "1.25rem" }}>
-          <div className="card">
-            <h2>Outcome (side to move)</h2>
-            <div className="bar" style={{ margin: "0.75rem 0" }}>
-              <span style={{ width: pct(result.wdl.win), background: "var(--win)" }} />
-              <span style={{ width: pct(result.wdl.draw), background: "var(--draw)" }} />
-              <span style={{ width: pct(result.wdl.loss), background: "var(--loss)" }} />
+      <div className="split">
+        <div className="board-wrap">
+          <div className="eval-row">
+            <div className="evalbar"><i style={{ height: `${whiteHeight}%` }} /></div>
+            <div style={{ flex: 1 }}>
+              <Chessboard position={fen} arePiecesDraggable={false} boardWidth={460}
+                customBoardStyle={{ borderRadius: "12px" }}
+                customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
+                customLightSquareStyle={{ backgroundColor: "#cdd6e6" }} />
             </div>
-            <p className="muted">
-              Win {pct(result.wdl.win)} · Draw {pct(result.wdl.draw)} · Loss{" "}
-              {pct(result.wdl.loss)}
-            </p>
-            <p className="muted">value (tanh): {result.value.toFixed(3)}</p>
           </div>
+          {mode === "custom" ? (
+            <input className="fen" style={{ marginTop: "0.7rem" }} value={customFen}
+              onChange={(e) => setCustomFen(e.target.value)} spellCheck={false} />
+          ) : (
+            <div className="row" style={{ marginTop: "0.7rem", justifyContent: "space-between" }}>
+              <span className="pill mono">move {gameStore.moveCount()}</span>
+              <button className="btn secondary" onClick={() => gameStore.reset()}>New game</button>
+            </div>
+          )}
+        </div>
+
+        <div className="panel-stack">
           <div className="card">
-            <h2>Best move &amp; rating</h2>
-            <p style={{ fontSize: "1.6rem", margin: "0.4rem 0" }} className="mono">
-              {result.bestMove || "-"}
-            </p>
-            <p className="muted">estimated rating: ~{Math.round(result.rating)} Elo</p>
-            <p className="muted">policy entropy: {result.policyEntropyBits.toFixed(2)} bits</p>
-            <p className="pill">
-              source:{" "}
-              <span className={result.source === "huggingface" ? "tag-hf" : "tag-fallback"}>
-                {result.source}
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <b>{turn} to move</b>
+              <span className="eval-num" style={{ color: evalP >= 0 ? "#eaf1f8" : "#f5a623", fontSize: "1.1rem" }}>
+                {evalP >= 0 ? "+" : ""}{evalP.toFixed(1)}
               </span>
-            </p>
+            </div>
+            <div style={{ marginTop: "0.7rem" }}>
+              {recs.length === 0 && <p className="muted">No legal moves - game over.</p>}
+              {recs.map((r, i) => (
+                <div key={r.uci} className={`rec ${i === 0 ? "top" : ""}`}>
+                  <span className="san">{r.san}</span>
+                  <span className="meter"><span style={{ width: `${Math.round(((r.score - lo) / span) * 100)}%` }} /></span>
+                  <span className="sc">{r.score >= 0 ? "+" : ""}{r.score.toFixed(2)}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card">
+            <b>Outcome (trained network)</b>
+            {wdl ? (
+              <>
+                <div className="bar" style={{ marginTop: "0.6rem", height: 12 }}>
+                  <span style={{ width: `${wdl.win * 100}%`, background: "var(--win)" }} />
+                  <span style={{ width: `${wdl.draw * 100}%`, background: "var(--draw)" }} />
+                  <span style={{ width: `${wdl.loss * 100}%`, background: "var(--loss)" }} />
+                </div>
+                <p className="muted" style={{ marginTop: "0.5rem" }}>
+                  win {Math.round(wdl.win * 100)}% · draw {Math.round(wdl.draw * 100)}% · loss {Math.round(wdl.loss * 100)}%
+                </p>
+              </>
+            ) : (
+              <p className="muted" style={{ marginTop: "0.5rem" }}>
+                Backend warming up - showing the offline engine&apos;s recommendations above.
+              </p>
+            )}
           </div>
         </div>
-      )}
-      {result?.error && (
-        <p className="muted" style={{ marginTop: "1rem" }}>Error: {result.error}</p>
-      )}
+      </div>
     </main>
   );
 }

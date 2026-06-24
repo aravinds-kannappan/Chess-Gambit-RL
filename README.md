@@ -17,18 +17,18 @@
 ## What it is
 
 An end-to-end chess RL system that **owns the whole pipeline**. It is a
-**multi-agent** engine: each position is routed to the method that owns it — exact
+**multi-agent** engine: each position is routed to the method that owns it - exact
 **MDP/Bellman** dynamic programming in solved endgames, **PPO** and **reward (DQN)**
 RL in the low-material regime, and an AlphaZero-lite **neural net** for the opening
 and middlegame (`agents/router.py`). It pre-trains on real Lichess games, improves
 by **continuous self-play**, **adapts to how you play**, and serves it all from a
-**Hugging Face Space that both trains and serves** — with **no heuristic fallback**.
+**Hugging Face Space that both trains and serves** - with **no heuristic fallback**.
 
 **Stockfish is the referee, never a player.** The agents never call Stockfish to
 choose a move. A separate backend evaluator (`eval/benchmark.py`) uses Stockfish
 purely as a calibrated yardstick: it scores each agent's **centipawn loss** and
 top-1 agreement, and assigns a **calibrated Elo** via gauntlets against Elo-throttled
-Stockfish. That rating is the level each agent plays at — and climbs as it learns.
+Stockfish. That rating is the level each agent plays at - and climbs as it learns.
 
 | Surface | What it does |
 | --- | --- |
@@ -49,10 +49,10 @@ Genuine playing strength comes from two things this project is honest about:
    what teaches it real chess; a network trained on a few toy games cannot play.
 2. **Search + scale.** MCTS adds lookahead at serve time, and self-play refines the
    network over generations. AlphaZero reached superhuman with *thousands of
-   TPU-hours* — strength scales with compute and data.
+   TPU-hours* - strength scales with compute and data.
 
 **On the Elo number:** a meaningful "2000 Elo" must be **anchored to a calibrated
-reference**. Stockfish is that reference and *only* that — the agents never use it to
+reference**. Stockfish is that reference and *only* that - the agents never use it to
 play. `eval/benchmark.py` throttles Stockfish to known Elo bands (`UCI_LimitStrength`
 + `UCI_Elo`, with a `Skill Level` fallback below the floor), plays each agent a
 gauntlet, and fits its rating (Bradley-Terry MLE in `eval/elo.py`); it also reports
@@ -62,7 +62,7 @@ Without that anchor, any Elo is only relative. The repo ships:
 - the pre-training pipeline on real strong-player Lichess data,
 - a **Stockfish-anchored evaluator** to place the agent on a real scale,
 - a **GPU training job** (`deploy/hf_job/run.py`) that trains on hundreds of
-  thousands of 2000+ games and self-plays — the realistic path to and past 2000.
+  thousands of 2000+ games and self-plays - the realistic path to and past 2000.
 
 Reaching a *certified* 2000+ requires running that job on a GPU (HF Jobs, funded by
 HF credit, or your own machine) with a Stockfish binary present. A laptop CPU
@@ -83,13 +83,13 @@ trains a network that genuinely plays, but cannot certify or reach 2000 on its o
                 Next.js on Vercel:  /play  /watch  /research  /predict  /ladder
 ```
 
-- **Pre-train** — behavioural cloning on real Lichess games (`models/supervised.py`).
-- **Self-play RL** — MCTS self-play improves the net each generation; each checkpoint
+- **Pre-train** - behavioural cloning on real Lichess games (`models/supervised.py`).
+- **Self-play RL** - MCTS self-play improves the net each generation; each checkpoint
   is rated on a stable anchored Elo ladder (`agents/alphazero/continual.py`, `agents/ladder.py`).
-- **Adapt** — live opponent-modeling + genuine per-session fine-tuning (`agents/adaptive.py`).
-- **Serve** — the Space (`deploy/hf_space/app.py`) over the package's `serve.py`; the site
+- **Adapt** - live opponent-modeling + genuine per-session fine-tuning (`agents/adaptive.py`).
+- **Serve** - the Space (`deploy/hf_space/app.py`) over the package's `serve.py`; the site
   has **no heuristic fallback** (`web/`).
-- **Foundations** — exact MDP/Bellman endgames, tabular Q, DQN, and the information-theory
+- **Foundations** - exact MDP/Bellman endgames, tabular Q, DQN, and the information-theory
   analysis from the project's first phase remain in `mdp/`, `agents/`, `infotheory/`.
 
 ## Quickstart
@@ -146,10 +146,10 @@ Chess-Gambit-RL/
 
 ## Deploying
 
-1. **HF Space** — create a Docker Space, point it at `deploy/hf_space/`, set
+1. **HF Space** - create a Docker Space, point it at `deploy/hf_space/`, set
    `HF_MODEL_REPO`, `HF_TOKEN`, `TRAIN_ENABLED=1`. It trains and serves; checkpoints
    persist to the model repo. (See `deploy/hf_space/README.md`.)
-2. **Vercel** — root `web/`, set `HF_SPACE_URL` (and `HF_SPACE_TOKEN` if private) to the
+2. **Vercel** - root `web/`, set `HF_SPACE_URL` (and `HF_SPACE_TOKEN` if private) to the
    Space. The site has no fallback, so the Space must be reachable.
 
 ## Limitations (stated honestly)
@@ -160,7 +160,7 @@ Chess-Gambit-RL/
   noisy on a few CPU minutes (a gauntlet found ~zero gen↔Elo correlation at that budget).
 - Without a Stockfish binary, the ladder Elo is **relative** (anchored to a random baseline),
   not a FIDE/Lichess-calibrated number.
-- Personal fine-tuning is light and KL-regularized — it nudges style, not a rebuild.
+- Personal fine-tuning is light and KL-regularized - it nudges style, not a rebuild.
 
 ## License
 

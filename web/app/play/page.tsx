@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Chess } from "chess.js";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Chessboard } from "react-chessboard";
+import { agentMove, evalPawns } from "@/app/lib/engine";
+import { gameStore, useGameVersion } from "@/app/lib/game";
 
 function sessionId(): string {
   if (typeof window === "undefined") return "anon";
@@ -11,74 +12,74 @@ function sessionId(): string {
   return id;
 }
 
+const START: Record<string, number> = { p: 8, n: 2, b: 2, r: 2, q: 1 };
+function captured(fen: string, color: "w" | "b"): string {
+  const board = fen.split(" ")[0];
+  const counts: Record<string, number> = { p: 0, n: 0, b: 0, r: 0, q: 0 };
+  for (const ch of board) {
+    const lower = ch.toLowerCase();
+    if (lower in counts) {
+      const isWhite = ch === ch.toUpperCase();
+      if ((color === "w" && isWhite) || (color === "b" && !isWhite)) counts[lower]++;
+    }
+  }
+  const glyph: Record<string, string> = color === "w"
+    ? { q: "♕", r: "♖", b: "♗", n: "♘", p: "♙" }
+    : { q: "♛", r: "♜", b: "♝", n: "♞", p: "♟" };
+  let out = "";
+  for (const k of ["q", "r", "b", "n", "p"]) out += glyph[k].repeat(Math.max(0, START[k] - counts[k]));
+  return out;
+}
+
 export default function PlayPage() {
-  const game = useMemo(() => new Chess(), []);
+  useGameVersion();
   const session = useMemo(sessionId, []);
-  const agentFens = useRef<string[]>([]);
-  const agentMoves = useRef<string[]>([]);
-  const [fen, setFen] = useState(game.fen());
-  const [status, setStatus] = useState("Your move - you are White.");
-  const [source, setSource] = useState("");
-  const [adaptInfo, setAdaptInfo] = useState<string>("");
-  const [history, setHistory] = useState<number[]>([]);
   const [competitive, setCompetitive] = useState(false);
   const [userElo, setUserElo] = useState(1200);
-  const targetElo = competitive ? 2300 : userElo;
+  const [status, setStatus] = useState("Your move - you are White.");
+  const [thinking, setThinking] = useState(false);
+  const [src, setSrc] = useState<{ source: string; route?: string; elo: number } | null>(null);
+  const [history, setHistory] = useState<number[]>([]);
+  const [adaptInfo, setAdaptInfo] = useState("");
 
-  useEffect(() => {
-    setHistory(JSON.parse(localStorage.getItem("sg_winrates") || "[]"));
-  }, []);
+  const targetElo = competitive ? 2300 : userElo;
+  const fen = gameStore.fen();
+  const evalP = evalPawns(fen);
+
+  useEffect(() => { setHistory(JSON.parse(localStorage.getItem("sg_winrates") || "[]")); }, []);
 
   const logIfOver = useCallback(async () => {
-    if (!game.isGameOver()) return;
-    // result for the agent (Black): +1 if White is checkmated.
-    let result = 0;
-    if (game.isCheckmate()) result = game.turn() === "w" ? 1 : -1;
+    if (!gameStore.isGameOver()) return;
+    const res = gameStore.result();
+    const result = res === "1-0" ? -1 : res === "0-1" ? 1 : 0; // agent is Black
     await fetch("/api/log-game", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ sessionId: session, fens: agentFens.current, moves: agentMoves.current, result }),
+      body: JSON.stringify({ sessionId: session, fens: gameStore.agentFens, moves: gameStore.agentMoves, result }),
     }).catch(() => {});
-  }, [game, session]);
+  }, [session]);
 
-  const agentMove = useCallback(async () => {
-    if (game.isGameOver()) { await logIfOver(); return; }
-    const fenBefore = game.fen();
+  const reply = useCallback(async () => {
+    if (gameStore.isGameOver()) { setStatus("Game over."); await logIfOver(); return; }
+    setThinking(true);
     try {
-      const res = await fetch("/api/move", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ fen: fenBefore, session, elo: targetElo }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) {
-        setStatus(`Backend warming up - try again shortly. (${data.reason ?? res.status})`);
-        return;
-      }
-      agentFens.current.push(fenBefore);
-      agentMoves.current.push(data.move);
-      game.move({ from: data.move.slice(0, 2), to: data.move.slice(2, 4), promotion: data.move.slice(4) || undefined });
-      setSource(data.source);
-      setFen(game.fen());
-      if (game.isGameOver()) { setStatus("Game over."); await logIfOver(); }
-      else setStatus("Your move.");
+      const mv = await agentMove(gameStore.fen(), targetElo, session);
+      gameStore.applyUci(mv.uci);
+      setSrc({ source: mv.source, route: mv.route, elo: mv.elo });
+      setStatus(gameStore.isGameOver() ? "Game over." : "Your move.");
+      if (gameStore.isGameOver()) await logIfOver();
     } catch {
-      setStatus("Backend unreachable.");
+      setStatus("No reply available.");
+    } finally {
+      setThinking(false);
     }
-  }, [game, session, logIfOver, targetElo]);
+  }, [targetElo, session, logIfOver]);
 
   const onDrop = useCallback((from: string, to: string) => {
-    try {
-      const mv = game.move({ from, to, promotion: "q" });
-      if (!mv) return false;
-    } catch { return false; }
-    setFen(game.fen());
-    void agentMove();
+    if (gameStore.turn() !== "w" || thinking) return false;
+    if (!gameStore.tryUserMove(from, to)) return false;
+    void reply();
     return true;
-  }, [game, agentMove]);
-
-  const newGame = () => {
-    game.reset(); agentFens.current = []; agentMoves.current = [];
-    setSource(""); setStatus("Your move - you are White."); setFen(game.fen());
-  };
+  }, [reply, thinking]);
 
   const retrain = async () => {
     setAdaptInfo("Fine-tuning on your games...");
@@ -88,67 +89,102 @@ export default function PlayPage() {
         body: JSON.stringify({ sessionId: session }),
       });
       const d = await res.json();
-      if (!res.ok || d.error) { setAdaptInfo(`Could not adapt: ${d.error ?? d.reason ?? res.status}`); return; }
-      const wr = d.agent_win_rate ?? 0;
-      const next = [...history, Math.round(wr * 100)];
+      if (!res.ok || d.error) { setAdaptInfo(`Backend warming up (${d.reason ?? d.error ?? res.status}).`); return; }
+      const wr = Math.round((d.agent_win_rate ?? 0) * 100);
+      const next = [...history, wr];
       setHistory(next); localStorage.setItem("sg_winrates", JSON.stringify(next));
-      setAdaptInfo(`Adapted on ${d.n_games} games · loss ${d.loss_before} → ${d.loss_after} · its win-rate vs you so far: ${(wr * 100).toFixed(0)}%`);
+      setAdaptInfo(`Adapted on ${d.n_games} games. Win-rate vs you: ${wr}%`);
     } catch { setAdaptInfo("Backend unreachable."); }
   };
 
+  const whiteHeight = Math.round(((Math.max(-6, Math.min(6, evalP)) + 6) / 12) * 100);
+  const moves = gameStore.history();
+
   return (
     <main className="container">
-      <h1 className="title">Play the adaptive agent</h1>
-      <p className="subtitle">{status}</p>
-      <div className="grid cols-2">
-        <div className="card">
-          <Chessboard position={fen} onPieceDrop={onDrop} boardWidth={420}
-            customBoardStyle={{ borderRadius: "8px" }} />
+      <div className="split">
+        <div className="board-wrap">
+          <div className="eval-row">
+            <div className="evalbar" title="evaluation"><i style={{ height: `${whiteHeight}%` }} /></div>
+            <div style={{ flex: 1 }}>
+              <Chessboard
+                position={fen}
+                onPieceDrop={onDrop}
+                boardWidth={460}
+                arePiecesDraggable={gameStore.turn() === "w" && !thinking}
+                customBoardStyle={{ borderRadius: "12px" }}
+                customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
+                customLightSquareStyle={{ backgroundColor: "#cdd6e6" }}
+              />
+            </div>
+          </div>
+          <div className="row" style={{ justifyContent: "space-between", marginTop: "0.7rem" }}>
+            <span className="captured" title="you captured">{captured(fen, "b")}</span>
+            <span className="eval-num" style={{ color: evalP >= 0 ? "#eaf1f8" : "#f5a623" }}>
+              {evalP >= 0 ? "+" : ""}{evalP.toFixed(1)}
+            </span>
+            <span className="captured" title="agent captured">{captured(fen, "w")}</span>
+          </div>
         </div>
-        <div className="card">
-          <h2>This agent learns from you</h2>
-          <p className="muted">
-            You play White; the trained network replies as Black. Your games are
-            logged to a personal checkpoint - press <b>Retrain</b> to fine-tune it
-            on how you play.
-          </p>
-          <p className="pill">last move source: <span className={source === "personal" ? "tag-hf" : "tag-fallback"}>{source || "-"}</span></p>
 
-          <div style={{ marginTop: "1rem", borderTop: "1px solid var(--border)", paddingTop: "1rem" }}>
+        <div className="panel-stack">
+          <div className="card">
+            <div className="vs">
+              <div className="who">
+                <div className="avatar" style={{ background: "rgba(109,176,255,0.12)" }}>🧑</div>
+                <div className="nm">You</div>
+                <div className="el">{userElo}</div>
+              </div>
+              <div className="mid">vs</div>
+              <div className="who">
+                <div className="avatar" style={{ background: "rgba(176,109,255,0.14)" }}>{competitive ? "🔥" : "🤖"}</div>
+                <div className="nm">{competitive ? "Tournament" : "Adaptive"} agent</div>
+                <div className="el">{competitive ? 2300 : targetElo}</div>
+              </div>
+            </div>
+            <p className="pill" style={{ textAlign: "center", marginTop: "0.6rem" }}>
+              {thinking ? "agent thinking..." : status}
+              {src && <> · via <span className={src.source === "agent" ? "tag-hf" : "tag-fallback"}>{src.route ?? src.source}</span></>}
+            </p>
+          </div>
+
+          <div className="card">
             <div className="row" style={{ justifyContent: "space-between" }}>
-              <b>Competitive mode</b>
-              <span
-                className={`toggle ${competitive ? "on" : ""}`}
-                onClick={() => setCompetitive((v) => !v)}
-                role="button"
-                tabIndex={0}
-              >
+              <b>Strength</b>
+              <span className={`toggle ${competitive ? "on" : ""}`} role="button" tabIndex={0}
+                onClick={() => setCompetitive((v) => !v)}>
                 {competitive ? "🔥 Tournament" : "🤝 Adaptive"}
               </span>
             </div>
             {competitive ? (
               <p className="muted" style={{ marginTop: "0.5rem" }}>
-                The agent plays at full tournament strength (~2300) - no mercy, no
-                adapting down. Train here to prepare for real competition.
+                Full tournament strength (~2300). No adapting down - train for real competition.
               </p>
             ) : (
-              <div style={{ marginTop: "0.5rem" }}>
-                <label className="muted">Match my level: <b>{userElo} Elo</b></label>
-                <input type="range" min={600} max={2200} step={50} value={userElo}
-                  onChange={(e) => setUserElo(Number(e.target.value))} style={{ width: "100%" }} />
-                <p className="muted">The agent meets you at your level and adapts as you improve.</p>
+              <div style={{ marginTop: "0.6rem" }}>
+                <div className="dial"><div className="v">{userElo}</div></div>
+                <input className="slider" type="range" min={600} max={2200} step={50} value={userElo}
+                  onChange={(e) => setUserElo(Number(e.target.value))} />
+                <p className="muted">The agent meets you at this level and adapts as you improve.</p>
               </div>
             )}
+            <div className="row" style={{ marginTop: "0.8rem" }}>
+              <button className="btn" onClick={() => gameStore.reset()}>New game</button>
+              <button className="btn secondary" onClick={retrain}>Retrain on my games</button>
+            </div>
+            {adaptInfo && <p className="muted" style={{ marginTop: "0.6rem" }}>{adaptInfo}</p>}
+            {history.length > 0 && <p className="muted">win-rate vs you: {history.map((h) => `${h}%`).join(" → ")}</p>}
           </div>
 
-          <div style={{ marginTop: "1rem", display: "flex", gap: "0.5rem" }}>
-            <button className="btn" onClick={newGame}>New game</button>
-            <button className="btn secondary" onClick={retrain}>Retrain on my games</button>
+          <div className="card">
+            <b>Moves</b>
+            <div className="movelist" style={{ marginTop: "0.5rem" }}>
+              {moves.length === 0 && <span className="no">no moves yet</span>}
+              {moves.map((m, i) => (
+                <span key={i} className="mv">{i % 2 === 0 && <span className="no">{i / 2 + 1}.</span>} {m}</span>
+              ))}
+            </div>
           </div>
-          {adaptInfo && <p className="muted" style={{ marginTop: "0.75rem" }}>{adaptInfo}</p>}
-          {history.length > 0 && (
-            <p className="muted">win-rate vs you over retrains: {history.map((h) => `${h}%`).join(" → ")}</p>
-          )}
         </div>
       </div>
     </main>

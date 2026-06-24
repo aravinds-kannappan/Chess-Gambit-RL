@@ -127,6 +127,22 @@ def _cmd_benchmark(args: argparse.Namespace) -> None:
     print(json.dumps(report, indent=2))
 
 
+def _cmd_calibrate(args: argparse.Namespace) -> None:
+    from .agents.stockfish import find_stockfish
+    from .serve import ModelServer
+
+    if find_stockfish(args.path) is None:
+        print(json.dumps({"error": "no Stockfish binary; set $STOCKFISH_PATH or install it"}))
+        return
+    endgames = tuple(n for n in (args.endgame or "").split(",") if n.strip())
+    server = ModelServer(args.run_dir, endgame_mdps=endgames)
+    server.ensure_seeded()
+    res = server.calibrate(stockfish_path=args.path, elo_games=args.games,
+                           n_positions=args.positions, movetime_ms=args.movetime,
+                           with_elo=not args.no_elo)
+    print(json.dumps(res, indent=2))
+
+
 def _cmd_analyze(args: argparse.Namespace) -> None:
     from . import reports
     from .data.dataset import load_records
@@ -244,6 +260,16 @@ def main(argv: list[str] | None = None) -> None:
     lc = sub.add_parser("ladder", help="print the checkpoint ladder (Elo per generation)")
     lc.add_argument("--run-dir", default="runs/continual", dest="run_dir")
     lc.set_defaults(func=_cmd_ladder)
+
+    cal = sub.add_parser("calibrate", help="assign the served agent a Stockfish-calibrated Elo")
+    cal.add_argument("--run-dir", default="runs/continual", dest="run_dir")
+    cal.add_argument("--endgame", default="", help="endgame MDPs for the router, e.g. KRvK,KQvK")
+    cal.add_argument("--positions", type=int, default=60)
+    cal.add_argument("--games", type=int, default=4, help="games per Elo anchor")
+    cal.add_argument("--movetime", type=int, default=30, help="Stockfish ms per move")
+    cal.add_argument("--no-elo", action="store_true", help="centipawn loss only (skip gauntlet)")
+    cal.add_argument("--path", default=None, help="explicit Stockfish binary path")
+    cal.set_defaults(func=_cmd_calibrate)
 
     bm = sub.add_parser("benchmark", help="score agents vs Stockfish (Elo + centipawn loss)")
     bm.add_argument("--model", default="runs/supervised/model.pt", help="neural checkpoint")

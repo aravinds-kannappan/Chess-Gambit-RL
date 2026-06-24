@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
+import { eloMove } from "@/app/lib/engine";
 
 const TIERS = [
   { name: "Novice", elo: 800, color: "#6db0ff" },
@@ -14,13 +15,6 @@ const TIERS = [
 ];
 
 type Counters = { games: number; moves: number; live: number; demo: number };
-
-function randomMove(game: Chess): string | null {
-  const moves = game.moves({ verbose: true });
-  if (moves.length === 0) return null;
-  const m = moves[Math.floor(Math.random() * moves.length)];
-  return m.from + m.to + (m.promotion ?? "");
-}
 
 function TierBoard({
   tier,
@@ -71,7 +65,7 @@ function TierBoard({
     } catch {
       /* fall through to local self-play */
     }
-    if (!uci) uci = randomMove(game); // demo self-play keeps the arena alive offline
+    if (!uci) uci = eloMove(game.fen(), tier.elo); // Elo-scaled engine keeps the arena alive offline
 
     if (uci) {
       try {

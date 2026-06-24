@@ -28,9 +28,13 @@ from shannons_gambit.serve import ModelServer
 MODELS_DIR = os.environ.get("MODELS_DIR", "models")
 HF_MODEL_REPO = os.environ.get("HF_MODEL_REPO", "")  # e.g. legacyaravind/shannons-gambit
 TRAIN_ENABLED = os.environ.get("TRAIN_ENABLED", "1") == "1"
+# Opt-in exact-endgame agents the phase router dispatches to (e.g. "KRvK,KQvK").
+# Off by default to keep cold starts fast on free CPU.
+ENDGAME_MDPS = tuple(n for n in os.environ.get("ENDGAME_MDP", "").split(",") if n.strip())
 
-server = ModelServer(MODELS_DIR)
+server = ModelServer(MODELS_DIR, endgame_mdps=ENDGAME_MDPS)
 _train_state = {"running": False, "last_gen": None, "last_elo": None}
+_calib_state = {"running": False, "result": None}
 
 
 def _background_trainer() -> None:
@@ -111,12 +115,36 @@ class AdaptReq(BaseModel):
 def healthz() -> dict:
     info = server.ladder_info()
     return {"status": "ok", "generations": info["generations"],
-            "best_elo": info["best_elo"], "training": _train_state}
+            "best_elo": info["best_elo"], "calibrated_elo": info["calibrated_elo"],
+            "training": _train_state, "calibration": _calib_state}
 
 
 @app.get("/ladder")
 def ladder() -> dict:
     return server.ladder_info()
+
+
+def _run_calibration() -> None:
+    _calib_state["running"] = True
+    try:
+        _calib_state["result"] = server.calibrate()
+        server.ladder.save()
+    except Exception as exc:  # noqa: BLE001 - surface, do not crash the worker
+        _calib_state["result"] = {"error": str(exc)}
+    finally:
+        _calib_state["running"] = False
+
+
+@app.post("/calibrate")
+def calibrate() -> dict:
+    """Grade the served agent against Stockfish and store its calibrated Elo.
+
+    Runs in the background (it plays real games vs Stockfish); poll /healthz.
+    """
+    if _calib_state["running"]:
+        return {"status": "already running", "calibration": _calib_state}
+    threading.Thread(target=_run_calibration, daemon=True).start()
+    return {"status": "started"}
 
 
 @app.post("/move")
