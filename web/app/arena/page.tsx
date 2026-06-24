@@ -23,7 +23,16 @@ export default function LadderPage() {
     return () => clearInterval(t);
   }, []);
 
-  const rows = [...(data?.levels ?? [])].sort((a, b) => a.elo - b.elo);
+  // Showing every generation is useless and laggy. Collapse to a handful of
+  // distinct Elo tiers: keep the strongest checkpoint per ~150-Elo band, cap 8.
+  const all = data?.levels ?? [];
+  const byBand = new Map<number, Level>();
+  for (const lvl of all) {
+    const band = Math.round(lvl.elo / 150);
+    const cur = byBand.get(band);
+    if (!cur || lvl.elo > cur.elo) byBand.set(band, lvl);
+  }
+  const rows = [...byBand.values()].sort((a, b) => a.elo - b.elo).slice(-8);
   const max = rows.length ? Math.max(...rows.map((r) => r.elo)) : 1;
   const min = rows.length ? Math.min(...rows.map((r) => r.elo)) : 0;
   const bestElo = rows.length ? Math.max(...rows.map((r) => r.elo)) : 0;
@@ -32,8 +41,9 @@ export default function LadderPage() {
     <main className="container">
       <h1 className="title" style={{ fontSize: "2rem" }}>The <span>ladder</span></h1>
       <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 1.4rem" }}>
-        Every self-play generation is a rung - a rated checkpoint. {live ? "Live from the training backend." : "Latest published run."}
-        {" "}Graded play and the tiers pick the rung nearest your chosen Elo.
+        The strongest checkpoint in each Elo band, as distinct tiers (not every
+        generation). {live ? "Live from the training backend." : "Latest published run."}
+        {" "}Graded play scales the best net to your chosen Elo.
       </p>
 
       {!data ? (

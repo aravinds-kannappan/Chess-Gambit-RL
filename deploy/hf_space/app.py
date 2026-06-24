@@ -74,6 +74,16 @@ async def lifespan(app: FastAPI):
             server.reload()
         except Exception:  # noqa: BLE001
             pass
+        # Serve from the strong pre-trained net (model.pt), scaled to the target
+        # Elo, instead of weak self-play generations. This is what makes graded
+        # play actually track the requested Elo.
+        try:
+            from huggingface_hub import hf_hub_download
+
+            base = hf_hub_download(HF_MODEL_REPO, "model.pt", local_dir=MODELS_DIR)
+            server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
+        except Exception as exc:  # noqa: BLE001
+            print("base model load skipped:", exc, flush=True)
     server.ensure_seeded()
     if TRAIN_ENABLED:
         threading.Thread(target=_background_trainer, daemon=True).start()
@@ -182,6 +192,18 @@ def log_game(req: LogReq) -> dict:
     return {"status": "logged", "session": req.session_id}
 
 
+def _base_checkpoint() -> str | None:
+    """Path to the checkpoint personal fine-tuning starts from (base net, else best)."""
+    base = Path(MODELS_DIR) / "model.pt"
+    if base.exists():
+        return str(base)
+    best = server.ladder.best() or server.ladder.latest()
+    if best is None:
+        return None
+    resolved = server._resolve(best)
+    return resolved if Path(resolved).exists() else None
+
+
 @app.post("/adapt")
 def adapt(req: AdaptReq) -> dict:
     import json
@@ -190,10 +212,15 @@ def adapt(req: AdaptReq) -> dict:
 
     path = Path(MODELS_DIR) / "sessions" / f"{req.session_id}.jsonl"
     if not path.exists():
-        return {"error": "no logged games for this session"}
-    games = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-    best = server.ladder.best()
-    out = Path(MODELS_DIR) / "personal" / f"{req.session_id}.pt"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    result = adapt_to_games(server._resolve(best), games, str(out))
-    return {"adapted": True, "n_games": len(games), **result}
+        return {"error": "no logged games for this session yet - play a full game first"}
+    base = _base_checkpoint()
+    if base is None:
+        return {"error": "no base checkpoint available to fine-tune from"}
+    try:
+        games = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+        out = Path(MODELS_DIR) / "personal" / f"{req.session_id}.pt"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        result = adapt_to_games(base, games, str(out))
+        return {"adapted": True, "n_games": len(games), **result}
+    except Exception as exc:  # noqa: BLE001 - report instead of a bare 500
+        return {"error": f"adapt failed: {exc}"}

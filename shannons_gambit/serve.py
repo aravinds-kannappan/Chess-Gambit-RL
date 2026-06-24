@@ -35,6 +35,11 @@ class ModelServer:
         self.ladder = Ladder.load(models_dir)
         self._models: dict[int, ChessNet] = {}
         self._predictors: dict[int, Predictor] = {}
+        # Optional pre-trained base net (the supervised model.pt). When set, every
+        # served move comes from this strong net scaled to the requested Elo,
+        # rather than from a noisy self-play generation.
+        self._base_model: ChessNet | None = None
+        self._base_elo: float = 1500.0
 
     # --- seeding / state ---------------------------------------------------
     def ensure_seeded(self, supervised_path: str = "runs/supervised/model.pt") -> None:
@@ -55,6 +60,17 @@ class ModelServer:
             elo = 600.0
         self.ladder.add(0, str(ckpt), elo, {"seeded": True})
         self.ladder.save()
+
+    def set_base(self, path: str, *, elo: float = 1500.0) -> bool:
+        """Use a pre-trained checkpoint as the served base net (scaled to target Elo)."""
+        if not Path(path).exists():
+            return False
+        from .models.net import load_model
+
+        model, _ = load_model(path, map_location=self.device)
+        self._base_model = model.to(self.device).eval()
+        self._base_elo = elo
+        return True
 
     def reload(self) -> None:
         self.ladder = Ladder.load(self.models_dir)
@@ -87,20 +103,29 @@ class ModelServer:
     # --- strength selection ------------------------------------------------
     def agent_for_elo(self, target_elo: float, *, seed: int = 0
                       ) -> tuple[AlphaZeroAgent, LadderEntry]:
-        entry = self.ladder.nearest(target_elo) or self.ladder.latest()
-        if entry is None:
-            raise RuntimeError("no checkpoints available; call ensure_seeded()")
-        model = self._model(entry.gen)
-        gap = target_elo - entry.elo
-        # A light temperature even at full strength so games are not identical
-        # every time (MCTS with no root noise is otherwise deterministic).
-        sims, temperature, blunder = self.base_sims, 0.35, 0.0
-        if gap < -50:  # weaker than this snapshot
-            blunder = min(0.6, -gap / 800.0)
-            temperature = 0.7
-            sims = max(8, self.base_sims // 2)
-        elif gap > 50:  # stronger
+        # Serve from the strongest net available (pre-trained base if set, else
+        # the BEST ladder checkpoint -- never a noisy weak generation), then scale
+        # its strength to the requested Elo. ``reference`` is that net's own Elo.
+        entry = self.ladder.best() or self.ladder.latest()
+        if self._base_model is not None:
+            model = self._base_model
+            reference = self._base_elo
+        else:
+            if entry is None:
+                raise RuntimeError("no checkpoints available; call ensure_seeded()")
+            model = self._model(entry.gen)
+            reference = float(entry.metrics.get("calibrated_elo") or entry.elo)
+        gap = target_elo - reference
+        # Light temperature even at full strength so games are not identical
+        # (MCTS with no root noise is otherwise deterministic).
+        sims, temperature, blunder = self.base_sims, 0.3, 0.0
+        if gap < -50:  # play down to a weaker target via blunders + lower search
+            blunder = min(0.8, (reference - target_elo) / 1400.0)
+            temperature = 0.85
+            sims = max(6, int(self.base_sims * max(0.25, 1 + gap / 1600.0)))
+        elif gap > 50:  # play up: more search, sharper
             sims = self.base_sims * 2
+            temperature = 0.15
         agent = AlphaZeroAgent(model, device=self.device, simulations=sims,
                                temperature=temperature, blunder_rate=blunder, seed=seed)
         return agent, entry
@@ -143,9 +168,10 @@ class ModelServer:
         mv = router.select_move(board)
         return {
             "move": mv.uci(),
-            "gen": entry.gen,
-            "elo": entry.elo,
-            "calibrated_elo": entry.metrics.get("calibrated_elo"),
+            "gen": entry.gen if entry else -1,
+            # Report the Elo the agent was actually scaled to play at.
+            "elo": round(float(target), 0),
+            "calibrated_elo": entry.metrics.get("calibrated_elo") if entry else None,
             "route": router.last_route,
             "source": "model",
         }

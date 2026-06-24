@@ -36,7 +36,11 @@ export default function DashboardPage() {
     return () => clearInterval(t);
   }, []);
 
-  const curve = ladder?.gauntlet ?? ladder?.elo_curve ?? [];
+  const rawCurve = ladder?.gauntlet ?? ladder?.elo_curve ?? [];
+  // Overlay a running best-so-far so progress is legible despite noisy CPU self-play.
+  let runBest = -Infinity;
+  const curve = rawCurve.map((r) => { runBest = Math.max(runBest, r.elo); return { ...r, best: Math.round(runBest) }; });
+  const peak = curve.length ? Math.max(...curve.map((r) => r.elo)) : null;
   const lossData = (ladder?.elo_curve ?? []).filter((r) => r.loss_policy != null);
   const mi = analysis?.feature_mutual_information_bits ?? {};
   const miData = Object.entries(mi).map(([name, v]) => ({ name, mi: Number(v.toFixed(4)) })).sort((a, b) => b.mi - a.mi);
@@ -76,15 +80,23 @@ export default function DashboardPage() {
       </div>
 
       <div className="card">
-        <h2>Strength over generations</h2>
-        <p className="muted">Anchored Elo per self-play generation. Noisy on a CPU budget; GPU bursts smooth and lift it.</p>
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <h2 style={{ margin: 0 }}>Strength over generations</h2>
+          {peak != null && <span className="chip">peak <b>{Math.round(peak)}</b> Elo</span>}
+        </div>
+        <p className="muted">
+          The orange line is each self-play generation (noisy on a free CPU); the blue
+          line is the best reached so far. Served play uses the best net, scaled to your
+          chosen Elo - not a random weak generation.
+        </p>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={curve}>
             <CartesianGrid strokeDasharray="3 3" stroke="#222a36" />
             <XAxis dataKey="gen" stroke="#93a1b5" />
             <YAxis stroke="#93a1b5" domain={["auto", "auto"]} />
             <Tooltip contentStyle={{ background: "#0b1018", border: "1px solid #2a313c", borderRadius: 10 }} />
-            <Line type="monotone" dataKey="elo" stroke="#f5a623" strokeWidth={2.5} dot={{ r: 3 }} />
+            <Line type="monotone" dataKey="elo" stroke="#f5a623" strokeWidth={1.5} dot={false} opacity={0.6} />
+            <Line type="monotone" dataKey="best" stroke="#6db0ff" strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>

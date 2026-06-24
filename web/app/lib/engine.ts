@@ -85,25 +85,31 @@ export function evalPawns(fen: string): number {
 }
 
 function depthForElo(elo: number): number {
-  if (elo < 1000) return 1;
-  if (elo < 1600) return 2;
-  return 3;
+  if (elo < 900) return 1;
+  if (elo < 1400) return 2;
+  if (elo < 2000) return 3;
+  return 4; // strong tiers search deeper
 }
+// Probability of NOT playing the best move, scaled steeply by Elo so the tiers
+// feel genuinely different (Novice ~0.7 down to Elite ~0.0).
 function blunderForElo(elo: number): number {
-  return Math.max(0, Math.min(0.5, (1750 - elo) / 2600));
+  return Math.max(0, Math.min(0.75, (2200 - elo) / 1900));
 }
 
 // A move at the requested strength: best play, perturbed by an Elo-scaled
-// blunder rate (weaker agents pick down their own preference list more often).
+// blunder rate (weaker agents pick further down their own preference list).
 export function eloMove(fen: string, elo: number): string | null {
-  const recs = recommend(fen, 8, depthForElo(elo));
+  const recs = recommend(fen, 10, depthForElo(elo));
   if (recs.length === 0) return null;
   if (Math.random() < blunderForElo(elo)) {
-    const k = Math.min(recs.length - 1, 1 + Math.floor(Math.random() * 3));
+    // weaker -> sample deeper into the move list (worse moves)
+    const spread = elo < 1000 ? recs.length : Math.max(2, Math.round((2200 - elo) / 250));
+    const k = Math.min(recs.length - 1, 1 + Math.floor(Math.random() * spread));
     return recs[k].uci;
   }
-  // tiny noise among near-best so games are not identical
-  const top = recs.filter((r) => r.score >= recs[0].score - 0.15);
+  // strong play: near-best, with a little noise so games are not identical
+  const window = elo >= 2000 ? 0.08 : 0.2;
+  const top = recs.filter((r) => r.score >= recs[0].score - window);
   return top[Math.floor(Math.random() * top.length)].uci;
 }
 
