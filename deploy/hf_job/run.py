@@ -40,7 +40,7 @@ def main() -> None:
         SupervisedConfig,
     )
     from shannons_gambit.data.dataset import build_dataset
-    from shannons_gambit.export import push_ladder_to_hub
+    from shannons_gambit.export import push_ladder_to_hub, push_model_to_hf
     from shannons_gambit.models.supervised import train_supervised
 
     # 1) real strong-player data
@@ -64,8 +64,11 @@ def main() -> None:
                                   device="auto"), args.selfplay_gens)
     print("elo curve:", res["elo_curve"], flush=True)
 
-    # 4) publish
-    print("== pushing ladder to the Hub ==", flush=True)
+    # 4) publish: the improved pre-trained net is the served base (model.pt),
+    #    plus the self-play ladder + checkpoints (under checkpoints/).
+    print("== pushing base model + ladder to the Hub ==", flush=True)
+    print(push_model_to_hf(args.hf_repo, "runs/supervised/model.pt", with_handler=False),
+          flush=True)
     print(push_ladder_to_hub(args.hf_repo, "runs/continual"), flush=True)
 
 
