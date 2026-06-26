@@ -74,6 +74,10 @@ class SupervisedConfig:
     rating_weight: float = 0.5
     device: str = "auto"  # auto -> mps/cuda/cpu
     max_positions: int = 200_000
+    # Sample opening/middlegame/endgame roughly equally. Early positions vastly
+    # outnumber the rest, so without this the net overfits openings and barely
+    # learns the middlegame -- exactly the gap this project was missing.
+    balance_phases: bool = True
     seed: int = 0
 
 

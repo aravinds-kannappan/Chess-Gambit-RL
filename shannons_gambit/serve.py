@@ -32,6 +32,9 @@ class ModelServer:
         self.endgame_mdps = tuple(endgame_mdps)
         self._endgame_agent: MDPAgent | None = None
         self._endgame_loaded = False
+        # Learned opening book (lazy-loaded from <models_dir>/opening_book.json).
+        self._opening_agent = None
+        self._opening_loaded = False
         self.ladder = Ladder.load(models_dir)
         self._models: dict[int, ChessNet] = {}
         self._predictors: dict[int, Predictor] = {}
@@ -76,6 +79,7 @@ class ModelServer:
         self.ladder = Ladder.load(self.models_dir)
         self._models.clear()
         self._predictors.clear()
+        self._opening_loaded = False  # re-read a freshly pulled opening_book.json
 
     def _resolve(self, entry: LadderEntry) -> str:
         """Return a usable checkpoint path (stored path, or by name in models_dir)."""
@@ -149,11 +153,26 @@ class ModelServer:
                 self._endgame_agent = MDPAgent(mdps) if mdps else None
         return self._endgame_agent
 
+    def opening_agent(self):
+        """Opening-book agent from ``<models_dir>/opening_book.json``, or ``None``."""
+        if not self._opening_loaded:
+            self._opening_loaded = True
+            path = Path(self.models_dir) / "opening_book.json"
+            if path.exists():
+                try:
+                    from .agents.opening_book import OpeningBook, OpeningBookAgent
+
+                    self._opening_agent = OpeningBookAgent(OpeningBook.load(str(path)))
+                except Exception:  # noqa: BLE001 - a bad book must not break serving
+                    self._opening_agent = None
+        return self._opening_agent
+
     def router_for_elo(self, target_elo: float, *, seed: int = 0
                        ) -> tuple[PhaseRouter, LadderEntry]:
-        """The served agent: a phase router (neural general + exact endgame)."""
+        """The served agent: a phase router (opening book + neural + exact endgame)."""
         neural, entry = self.agent_for_elo(target_elo, seed=seed)
-        router = PhaseRouter(general=neural, endgame=self.endgame_agent())
+        router = PhaseRouter(general=neural, endgame=self.endgame_agent(),
+                             opening=self.opening_agent())
         return router, entry
 
     # --- request handlers --------------------------------------------------
@@ -202,7 +221,8 @@ class ModelServer:
     def calibrate(self, *, stockfish_path: str | None = None,
                   anchors: tuple[int, ...] = (1350, 1700, 2100),
                   elo_games: int = 4, n_positions: int = 60,
-                  movetime_ms: int = 30, with_elo: bool = True) -> dict:
+                  movetime_ms: int = 30, with_elo: bool = True,
+                  with_phase_acpl: bool = True) -> dict:
         """Score the served agent against Stockfish and store a calibrated Elo.
 
         This is the only place Stockfish touches serving: it grades the agent (it
@@ -211,7 +231,12 @@ class ModelServer:
         Heavy on CPU (real games vs Stockfish); call it on demand, not per move.
         """
         from .agents.stockfish import find_stockfish
-        from .eval.benchmark import assess_elo, move_quality, random_positions
+        from .eval.benchmark import (
+            assess_elo,
+            move_quality,
+            move_quality_by_phase,
+            random_positions,
+        )
 
         if find_stockfish(stockfish_path) is None:
             raise RuntimeError("no Stockfish binary; set $STOCKFISH_PATH or install it")
@@ -225,6 +250,13 @@ class ModelServer:
         best.metrics["acpl"] = quality["avg_centipawn_loss"]
         best.metrics["top1"] = quality["top1_agreement"]
         result = {"gen": best.gen, **quality}
+        if with_phase_acpl:
+            router_p, _ = self.router_for_elo(best.elo)
+            by_phase = move_quality_by_phase(router_p, movetime_ms=movetime_ms,
+                                             path=stockfish_path)
+            acpl_by_phase = {p: q["avg_centipawn_loss"] for p, q in by_phase.items()}
+            best.metrics["acpl_by_phase"] = acpl_by_phase
+            result["acpl_by_phase"] = acpl_by_phase
         if with_elo:
             router2, _ = self.router_for_elo(best.elo)
             elo = assess_elo(router2, anchors=anchors, games=elo_games,

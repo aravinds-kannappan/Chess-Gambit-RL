@@ -100,6 +100,53 @@ def move_quality(
     }
 
 
+def phase_positions(n_per_phase: int = 20, *, seed: int = 0,
+                    max_attempts: int = 5000) -> dict[str, list[chess.Board]]:
+    """Sample non-terminal positions bucketed by game phase (opening/mid/end)."""
+    from ..phases import PHASES, game_phase
+
+    rng = random.Random(seed)
+    buckets: dict[str, list[chess.Board]] = {p: [] for p in PHASES}
+    for _ in range(max_attempts):
+        if all(len(v) >= n_per_phase for v in buckets.values()):
+            break
+        board = chess.Board()
+        for _ in range(rng.randint(0, 80)):
+            if board.is_game_over():
+                break
+            board.push(rng.choice(list(board.legal_moves)))
+        if board.is_game_over() or not any(board.legal_moves):
+            continue
+        bucket = buckets[game_phase(board)]
+        if len(bucket) < n_per_phase:
+            bucket.append(board)
+    return buckets
+
+
+def move_quality_by_phase(
+    agent: Agent,
+    *,
+    n_per_phase: int = 20,
+    reference_elo: int = 2800,
+    movetime_ms: int = 50,
+    path: str | None = None,
+    seed: int = 0,
+) -> dict:
+    """Average centipawn loss of ``agent`` broken down by game phase.
+
+    Surfaces *where* an agent is weak -- the opening/middlegame blind spot the
+    project had no visibility into before. One Stockfish reference scores all
+    phases identically; out-of-the-book opening play is graded here too.
+    """
+    buckets = phase_positions(n_per_phase, seed=seed)
+    out: dict[str, dict] = {}
+    for phase, positions in buckets.items():
+        if positions:
+            out[phase] = move_quality(agent, positions, reference_elo=reference_elo,
+                                      movetime_ms=movetime_ms, path=path)
+    return out
+
+
 def assess_elo(
     agent: Agent,
     *,

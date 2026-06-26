@@ -74,6 +74,32 @@ def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
     return True
 
 
+def push_opening_book(repo_id: str, book_path: str) -> str:
+    """Upload the learned opening book to the model repo (served by the Space)."""
+    from huggingface_hub import HfApi, create_repo
+
+    create_repo(repo_id, exist_ok=True, repo_type="model")
+    HfApi().upload_file(path_or_fileobj=book_path, path_in_repo="opening_book.json",
+                        repo_id=repo_id)
+    return f"https://huggingface.co/{repo_id}"
+
+
+def pull_opening_book(repo_id: str, run_dir: str) -> str | None:
+    """Download ``opening_book.json`` into ``run_dir`` (best-effort)."""
+    from huggingface_hub import hf_hub_download
+
+    run = Path(run_dir)
+    run.mkdir(parents=True, exist_ok=True)
+    try:
+        fp = Path(hf_hub_download(repo_id, "opening_book.json", local_dir=str(run)))
+    except Exception:
+        return None
+    target = run / "opening_book.json"
+    if fp != target:
+        shutil.move(str(fp), str(target))
+    return str(target)
+
+
 def pull_base_model(repo_id: str, run_dir: str) -> str | None:
     """Download the served base net (pretrain/model.pt, legacy root model.pt)."""
     from huggingface_hub import hf_hub_download

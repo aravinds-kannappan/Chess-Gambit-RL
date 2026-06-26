@@ -64,9 +64,11 @@ def iter_positions(cfg: DataConfig) -> Iterator[dict]:
     """Yield one record per position from the configured source.
 
     Record fields: ``fen, move_uci, move_index, stm_value, stm_result,
-    eval_cp, mover_elo, ply``. ``stm_value`` is the eventual game result from
-    the side-to-move's perspective (+1 win / 0 draw / -1 loss).
+    eval_cp, mover_elo, ply, phase``. ``stm_value`` is the eventual game result
+    from the side-to-move's perspective (+1 win / 0 draw / -1 loss); ``phase`` is
+    ``opening`` / ``middlegame`` / ``endgame`` for phase-balanced training.
     """
+    from ..phases import game_phase
     from .encode import move_to_index  # local import avoids a cycle at module load
 
     source = cfg.url if (cfg.url.startswith("http") or Path(cfg.url).exists()) else str(SAMPLE_PGN)
@@ -99,6 +101,7 @@ def iter_positions(cfg: DataConfig) -> Iterator[dict]:
                 "eval_cp": eval_cp,
                 "mover_elo": mover_elo,
                 "ply": ply,
+                "phase": game_phase(board, ply=ply),
             }
             board.push(move)
             ply += 1

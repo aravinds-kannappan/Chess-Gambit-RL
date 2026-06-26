@@ -74,6 +74,13 @@ async def lifespan(app: FastAPI):
             server.reload()
         except Exception:  # noqa: BLE001
             pass
+        try:  # learned opening book (served for the first plies); optional
+            from shannons_gambit.export import pull_opening_book
+
+            pull_opening_book(HF_MODEL_REPO, MODELS_DIR)
+            server.reload()
+        except Exception:  # noqa: BLE001
+            pass
         # Serve from the strong pre-trained net (pretrain/model.pt), scaled to the
         # target Elo, instead of weak self-play generations. This is what makes
         # graded play actually track the requested Elo.

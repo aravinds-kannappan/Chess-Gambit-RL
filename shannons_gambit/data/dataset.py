@@ -18,7 +18,7 @@ from .lichess import iter_positions
 
 _SCHEMA_FIELDS = [
     "fen", "move_uci", "move_index", "stm_value",
-    "stm_result", "eval_cp", "mover_elo", "ply",
+    "stm_result", "eval_cp", "mover_elo", "ply", "phase",
 ]
 
 
@@ -48,7 +48,7 @@ def build_dataset(cfg: DataConfig) -> dict:
 
     for rec in iter_positions(cfg):
         for k in _SCHEMA_FIELDS:
-            buf[k].append(rec.get(k))
+            buf[k].append(rec.get(k, "middlegame" if k == "phase" else None))
         n_total += 1
         if len(buf["fen"]) >= cfg.shard_size:
             flush()
@@ -62,8 +62,17 @@ def load_records(data_dir: str, *, max_positions: int | None = None) -> dict[str
     files = sorted(pos.glob("shard_*.parquet"))
     if not files:
         raise FileNotFoundError(f"no parquet shards in {pos}; run the data pipeline first")
-    table = pa.concat_tables([pq.read_table(f) for f in files])
-    cols = {name: table.column(name).to_numpy(zero_copy_only=False) for name in _SCHEMA_FIELDS}
+    table = pa.concat_tables([pq.read_table(f) for f in files], promote_options="default")
+    present = set(table.column_names)
+    n_rows = table.num_rows
+    cols = {}
+    for name in _SCHEMA_FIELDS:
+        if name in present:
+            cols[name] = table.column(name).to_numpy(zero_copy_only=False)
+        elif name == "phase":  # older shards predate phase tagging
+            cols[name] = np.array(["middlegame"] * n_rows, dtype=object)
+        else:
+            cols[name] = np.array([None] * n_rows, dtype=object)
     if max_positions is not None and len(cols["fen"]) > max_positions:
         cols = {k: v[:max_positions] for k, v in cols.items()}
     return cols
@@ -84,6 +93,8 @@ class PositionDataset:
         self.policy = records["move_index"].astype(np.int64)
         self.value = records["stm_value"].astype(np.float32)
         self.wdl = records["stm_result"].astype(np.int64)
+        self.phase = np.asarray(
+            records.get("phase", np.array(["middlegame"] * len(fens))), dtype=object)
 
         elo = records["mover_elo"].astype(np.float64)
         self.rating_mask = np.isfinite(elo) & (elo > 0)
@@ -96,6 +107,18 @@ class PositionDataset:
 
     def __len__(self) -> int:
         return len(self.value)
+
+    def phase_weights(self) -> np.ndarray:
+        """Per-sample weights inversely proportional to phase frequency.
+
+        Early positions hugely outnumber middlegame/endgame ones, so uniform
+        sampling teaches openings and neglects the rest. These weights let a
+        ``WeightedRandomSampler`` draw each phase roughly equally.
+        """
+        phases, inverse = np.unique(self.phase, return_inverse=True)
+        counts = np.bincount(inverse, minlength=len(phases)).astype(np.float64)
+        freq = counts / counts.sum()
+        return (1.0 / freq[inverse]).astype(np.float32)
 
     def to_torch(self):
         """Return a ``torch.utils.data.TensorDataset`` of all fields."""

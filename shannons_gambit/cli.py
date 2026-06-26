@@ -100,6 +100,20 @@ def _cmd_train_continual(args: argparse.Namespace) -> None:
     print(json.dumps(res["elo_curve"], indent=2))
 
 
+def _cmd_build_book(args: argparse.Namespace) -> None:
+    from .agents.opening_book import build_book
+
+    book = build_book(args.source or "", max_games=args.games, min_elo=args.min_elo,
+                      max_ply=args.max_ply, min_count=args.min_count, top_k=args.top_k)
+    book.save(args.out)
+    print(json.dumps({"positions": len(book), "max_ply": book.max_ply, "out": args.out},
+                     indent=2))
+    if args.hf:
+        from .export import push_opening_book
+
+        print("pushed:", push_opening_book(args.hf, args.out))
+
+
 def _cmd_ladder(args: argparse.Namespace) -> None:
     from .agents.ladder import Ladder
 
@@ -256,6 +270,18 @@ def main(argv: list[str] | None = None) -> None:
     tc.add_argument("--run-dir", default="runs/continual", dest="run_dir")
     tc.add_argument("--scratch", action="store_true", help="start from a random net")
     tc.set_defaults(func=_cmd_train_continual)
+
+    bk = sub.add_parser("build-book", help="build a weighted opening book from real games")
+    bk.add_argument("--source", default=None, help="PGN url or path (default: bundled sample)")
+    bk.add_argument("--games", type=int, default=20_000, help="max games to scan")
+    bk.add_argument("--min-elo", type=int, default=2000, dest="min_elo")
+    bk.add_argument("--max-ply", type=int, default=24, dest="max_ply", help="book depth in plies")
+    bk.add_argument("--min-count", type=int, default=5, dest="min_count",
+                    help="drop moves seen fewer than this many times")
+    bk.add_argument("--top-k", type=int, default=4, dest="top_k", help="moves kept per position")
+    bk.add_argument("--out", default="runs/continual/opening_book.json")
+    bk.add_argument("--hf", default=None, help="also push to this HF model repo id")
+    bk.set_defaults(func=_cmd_build_book)
 
     lc = sub.add_parser("ladder", help="print the checkpoint ladder (Elo per generation)")
     lc.add_argument("--run-dir", default="runs/continual", dest="run_dir")

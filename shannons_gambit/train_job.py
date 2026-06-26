@@ -27,6 +27,7 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
 
     from shannons_gambit.agents.alphazero.continual import run_generations
+    from shannons_gambit.agents.opening_book import build_book
     from shannons_gambit.config import (
         ContinualConfig,
         DataConfig,
@@ -34,7 +35,11 @@ def main(argv: list[str] | None = None) -> None:
         SupervisedConfig,
     )
     from shannons_gambit.data.dataset import build_dataset
-    from shannons_gambit.export import push_ladder_to_hub, push_model_to_hf
+    from shannons_gambit.export import (
+        push_ladder_to_hub,
+        push_model_to_hf,
+        push_opening_book,
+    )
     from shannons_gambit.models.supervised import train_supervised
 
     # 1) real strong-player data
@@ -58,11 +63,18 @@ def main(argv: list[str] | None = None) -> None:
                                   device="auto"), args.selfplay_gens)
     print("elo curve:", res["elo_curve"], flush=True)
 
-    # 4) publish the pipeline as folders: pretrain/ (served base) + posttrain/.
-    print("== pushing pretrain/ base model + posttrain/ ladder to the Hub ==", flush=True)
+    # 4) opening book from the same strong-player games (cheap opening strength)
+    print("== building + pushing opening book ==", flush=True)
+    book = build_book(args.url, max_games=args.games, min_elo=args.min_elo)
+    book.save("runs/continual/opening_book.json")
+    print({"book_positions": len(book)}, flush=True)
+
+    # 5) publish the pipeline as folders: pretrain/ (served base) + posttrain/.
+    print("== pushing pretrain/ base model + posttrain/ ladder + book to the Hub ==", flush=True)
     print(push_model_to_hf(args.hf_repo, "runs/supervised/model.pt",
                            dest="pretrain/model.pt", with_handler=False), flush=True)
     print(push_ladder_to_hub(args.hf_repo, "runs/continual"), flush=True)
+    print(push_opening_book(args.hf_repo, "runs/continual/opening_book.json"), flush=True)
     print("== done ==", flush=True)
 
 

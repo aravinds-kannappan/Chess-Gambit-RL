@@ -27,9 +27,15 @@ def train_supervised(cfg: SupervisedConfig) -> dict:
     records = load_records(cfg.data_dir, max_positions=cfg.max_positions)
     dataset = PositionDataset(records)
     tensors = dataset.to_torch()
-    loader = torch.utils.data.DataLoader(
-        tensors, batch_size=cfg.batch_size, shuffle=True, drop_last=False
-    )
+    if cfg.balance_phases:
+        # draw opening/middlegame/endgame roughly equally (see phase_weights).
+        weights = torch.from_numpy(dataset.phase_weights()).double()
+        sampler = torch.utils.data.WeightedRandomSampler(weights, len(weights), replacement=True)
+        loader = torch.utils.data.DataLoader(
+            tensors, batch_size=cfg.batch_size, sampler=sampler, drop_last=False)
+    else:
+        loader = torch.utils.data.DataLoader(
+            tensors, batch_size=cfg.batch_size, shuffle=True, drop_last=False)
 
     model = ChessNet(channels=cfg.net.channels, blocks=cfg.net.blocks).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)

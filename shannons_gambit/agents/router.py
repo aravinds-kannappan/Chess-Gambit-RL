@@ -75,21 +75,29 @@ class MDPAgent(Agent):
 class PhaseRouter(Agent):
     """Route each move to the sub-agent that owns the current position.
 
-    ``endgame`` (e.g. MDP / PPO / reward) handles positions for which
-    ``endgame_applies`` is true; everything else falls to ``general``. The most
-    recent and cumulative routing decisions are recorded for the benchmark to
-    attribute move quality to the agent that actually played.
+    Priority: ``opening`` (a learned opening book) while it has a move for the
+    position, then ``endgame`` (MDP / PPO / reward) where ``endgame_applies`` is
+    true, otherwise ``general``. The most recent and cumulative routing decisions
+    are recorded for the benchmark to attribute move quality to the agent that
+    actually played.
     """
 
     name = "router"
 
     def __init__(self, general: Agent, *, endgame: Agent | None = None,
-                 endgame_max_men: int = 7) -> None:
+                 opening: Agent | None = None, endgame_max_men: int = 7) -> None:
         self.general = general
         self.endgame = endgame
+        self.opening = opening
         self.endgame_max_men = endgame_max_men
         self.last_route: str | None = None
         self.routes: Counter[str] = Counter()
+
+    def opening_applies(self, board: chess.Board) -> bool:
+        if self.opening is None:
+            return False
+        applies = getattr(self.opening, "applies", None)
+        return bool(applies(board)) if callable(applies) else False
 
     def endgame_applies(self, board: chess.Board) -> bool:
         if self.endgame is None:
@@ -100,6 +108,8 @@ class PhaseRouter(Agent):
         return piece_count(board) <= self.endgame_max_men
 
     def _route(self, board: chess.Board) -> tuple[Agent, str]:
+        if self.opening is not None and self.opening_applies(board):
+            return self.opening, getattr(self.opening, "name", "opening")
         if self.endgame is not None and self.endgame_applies(board):
             return self.endgame, getattr(self.endgame, "name", "endgame")
         return self.general, getattr(self.general, "name", "general")
