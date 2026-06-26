@@ -27,7 +27,13 @@ from shannons_gambit.serve import ModelServer
 
 MODELS_DIR = os.environ.get("MODELS_DIR", "models")
 HF_MODEL_REPO = os.environ.get("HF_MODEL_REPO", "")  # e.g. legacyaravind/shannons-gambit
-TRAIN_ENABLED = os.environ.get("TRAIN_ENABLED", "1") == "1"
+# Serve-only by default: a CPU Space that also self-plays starves the web server
+# (healthz times out -> the site shows "backend warming up"). Train on HF Jobs
+# (deploy/hf_job) and set TRAIN_ENABLED=1 only on a Space you don't also serve from.
+TRAIN_ENABLED = os.environ.get("TRAIN_ENABLED", "0") == "1"
+# Seconds the background trainer sleeps between generations to yield CPU to
+# request handling when training and serving do share a box.
+TRAIN_SLEEP = float(os.environ.get("TRAIN_SLEEP", "5"))
 # Opt-in exact-endgame agents the phase router dispatches to (e.g. "KRvK,KQvK").
 # Off by default to keep cold starts fast on free CPU.
 ENDGAME_MDPS = tuple(n for n in os.environ.get("ENDGAME_MDP", "").split(",") if n.strip())
@@ -49,16 +55,23 @@ def _background_trainer() -> None:
     )
     trainer = ContinualTrainer(cfg)
     _train_state["running"] = True
+    # Drop the worker's scheduling priority so request handling stays responsive.
+    try:
+        os.nice(10)
+    except (AttributeError, OSError):
+        pass
     while True:
         try:
             entry = trainer.step()
-            _train_state.update(last_gen=entry.gen, last_elo=entry.elo)
+            _train_state.update(last_gen=entry.gen, last_elo=entry.elo,
+                                promoted=entry.metrics.get("promoted"))
             server.reload()
             if HF_MODEL_REPO and os.environ.get("HF_TOKEN"):
                 try:
                     push_ladder_to_hub(HF_MODEL_REPO, MODELS_DIR)
                 except Exception:  # noqa: BLE001 - Hub push is best-effort
                     pass
+            time.sleep(TRAIN_SLEEP)  # yield CPU between generations
         except Exception as exc:  # noqa: BLE001 - keep the worker alive
             print("trainer error:", exc, flush=True)
             time.sleep(10)
