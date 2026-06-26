@@ -59,9 +59,11 @@ card to the Hugging Face Hub.
 
 ## Web app
 
-`web/` is a Next.js (App Router) project. API routes proxy a Hugging Face
-Inference Endpoint (if configured) and fall back to a TypeScript heuristic agent
-so the site always works. The analysis and arena pages render exported JSON.
+`web/` is a Next.js (App Router) project. The `/api/move` and `/api/predict`
+routes proxy the Hugging Face Space and return a 503 ("backend warming up") with
+**no heuristic fallback** if it is unreachable. The spectate views (`/watch`,
+`/tiers`) do fall back to a local Elo-scaled engine so they never go dark. The
+dashboard and arena pages render the live ladder (or exported JSON).
 
 ## Configuration
 

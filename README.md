@@ -17,12 +17,16 @@
 ## What it is
 
 An end-to-end chess RL system that **owns the whole pipeline**. It is a
-**multi-agent** engine: each position is routed to the method that owns it - exact
-**MDP/Bellman** dynamic programming in solved endgames, **PPO** and **reward (DQN)**
-RL in the low-material regime, and an AlphaZero-lite **neural net** for the opening
-and middlegame (`agents/router.py`). It pre-trains on real Lichess games, improves
-by **continuous self-play**, **adapts to how you play**, and serves it all from a
-**Hugging Face Space that both trains and serves** - with **no heuristic fallback**.
+**multi-agent** engine: each position is routed to the method that owns it - a
+**learned opening book** for the first moves, an AlphaZero-lite **neural net** for the
+middlegame, exact **MDP/Bellman** dynamic programming in solved endgames, with
+**PPO** and **reward (DQN)** RL in the low-material regime (`agents/router.py`). It
+pre-trains on real Lichess games (sampled evenly across opening/middlegame/endgame),
+improves by **continuous self-play with champion gating** (a new generation is served
+only if it actually beats the current one - so strength never regresses), and
+**adapts to how you play**. Play and prediction have **no heuristic fallback** (every
+move is a trained net); the spectate views fall back to a local engine so they never
+go dark when the backend is asleep.
 
 **Stockfish is the referee, never a player.** The agents never call Stockfish to
 choose a move. A separate backend evaluator (`eval/benchmark.py`) uses Stockfish
@@ -83,12 +87,16 @@ trains a network that genuinely plays, but cannot certify or reach 2000 on its o
                 Next.js on Vercel:  /play  /watch  /research  /predict  /ladder
 ```
 
-- **Pre-train** - behavioural cloning on real Lichess games (`models/supervised.py`).
-- **Self-play RL** - MCTS self-play improves the net each generation; each checkpoint
-  is rated on a stable anchored Elo ladder (`agents/alphazero/continual.py`, `agents/ladder.py`).
+- **Pre-train** - behavioural cloning on real Lichess games, phase-balanced so the net
+  learns the middlegame and not just opening moves (`models/supervised.py`).
+- **Opening book** - a weighted book learned from strong-player games by position hash,
+  routed for the first plies (`agents/opening_book.py`, `sgambit build-book`).
+- **Self-play RL** - MCTS self-play with **champion gating**: each contender must beat
+  the champion head-to-head to be promoted, else its weights are rolled back, so the
+  Elo ladder climbs only on real, verified wins (`agents/alphazero/continual.py`).
 - **Adapt** - live opponent-modeling + genuine per-session fine-tuning (`agents/adaptive.py`).
-- **Serve** - the Space (`deploy/hf_space/app.py`) over the package's `serve.py`; the site
-  has **no heuristic fallback** (`web/`).
+- **Serve** - the Space (`deploy/hf_space/app.py`) over the package's `serve.py`; serves
+  the gated champion + book, with no fallback for play/predict (`web/`).
 - **Foundations** - exact MDP/Bellman endgames, tabular Q, DQN, and the information-theory
   analysis from the project's first phase remain in `mdp/`, `agents/`, `infotheory/`.
 
@@ -104,7 +112,8 @@ python scripts/download_data.py --source \
   --games 120000 --min-elo 2000
 
 sgambit train supervised --preset local_full     # pre-train (behavioural cloning)
-sgambit train-continual --gens 5                 # self-play generations (versioned ladder)
+sgambit build-book --min-elo 2000                # learn an opening book from real games
+sgambit train-continual --gens 5                 # self-play generations (gated ladder)
 sgambit ladder                                   # Elo per generation
 
 # Serve locally (the Space app)
@@ -146,18 +155,25 @@ Chess-Gambit-RL/
 
 ## Deploying
 
-1. **HF Space** - create a Docker Space, point it at `deploy/hf_space/`, set
-   `HF_MODEL_REPO`, `HF_TOKEN`, `TRAIN_ENABLED=1`. It trains and serves; checkpoints
-   persist to the model repo. (See `deploy/hf_space/README.md`.)
-2. **Vercel** - root `web/`, set `HF_SPACE_URL` (and `HF_SPACE_TOKEN` if private) to the
-   Space. The site has no fallback, so the Space must be reachable.
+1. **HF Space (serving)** - create a Docker Space, point it at `deploy/hf_space/`, set
+   `HF_MODEL_REPO` (and `HF_TOKEN` if private). It serves the published champion +
+   opening book; checkpoints persist to the model repo. Leave `TRAIN_ENABLED=0`: a CPU
+   Space that also self-plays starves the web server (`/healthz` times out and the site
+   shows "backend warming up"). (See `deploy/hf_space/README.md`.)
+2. **Training (GPU)** - run the heavy job on **HF Jobs**, not the serving Space:
+   `hf jobs run --flavor a10g-small --secrets HF_TOKEN python -m shannons_gambit.train_job ...`.
+   It pre-trains, self-plays, builds the opening book, and pushes everything to the repo.
+3. **Vercel (frontend only)** - root `web/`, set `HF_SPACE_URL` (and `HF_SPACE_TOKEN` if
+   private) to the Space. **Vercel only runs the Next.js site; it does not train anything**
+   - API keys there do not start training. Play/predict need the Space reachable.
 
 ## Limitations (stated honestly)
 
 - **Certified 2000+ Elo is not produced on a laptop CPU.** It needs GPU-scale training
   on real strong-player data plus a Stockfish anchor; the job and evaluator are provided.
-- Self-play loss falls cleanly, but *objective* strength gains per generation are small and
-  noisy on a few CPU minutes (a gauntlet found ~zero gen↔Elo correlation at that budget).
+- On a few CPU minutes, self-play rarely produces a generation that beats the champion,
+  so the **gated** ladder stays flat (it simply won't promote) rather than climbing - but,
+  by design, it can no longer *regress* into weak play either. Real climbing needs the GPU job.
 - Without a Stockfish binary, the ladder Elo is **relative** (anchored to a random baseline),
   not a FIDE/Lichess-calibrated number.
 - Personal fine-tuning is light and KL-regularized - it nudges style, not a rebuild.
