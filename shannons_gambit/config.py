@@ -205,10 +205,21 @@ class ContinualConfig:
     batch_size: int = 128
     lr: float = 5e-4
     epochs_per_gen: int = 2
-    # anchored Elo evaluation
+    # anchored Elo evaluation + champion gating
     eval_games: int = 6      # games vs each anchor agent
     eval_sims: int = 24      # MCTS sims during evaluation (cheap)
     random_anchor_elo: float = 600.0  # fixes the absolute Elo scale
+    # A new generation only replaces the served champion if it beats it by at
+    # least this score (0.5 = even). Below it, the net is reverted to the
+    # champion -- so self-play can never *degrade* the served strength.
+    gate_threshold: float = 0.55
+    # Cap on how far a single gauntlet can move a checkpoint's Elo (a handful of
+    # games cannot credibly measure a multi-hundred-point gap).
+    elo_step_clamp: float = 200.0
+    # The first generation has no champion to gate against; rate it vs the random
+    # anchor but cap the result here (beating a random mover proves you are
+    # *above* it, not that you are 2000 -- only a Stockfish anchor measures that).
+    first_gen_elo_cap: float = 1000.0
     device: str = "auto"
     seed: int = 0
 

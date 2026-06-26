@@ -29,6 +29,10 @@ class Ladder:
     run_dir: str
     random_anchor_elo: float = 600.0
     entries: list[LadderEntry] = field(default_factory=list)
+    # The generation currently served: the strongest *gated* checkpoint (one that
+    # actually beat its predecessor head-to-head), not merely the highest Elo. The
+    # served net is promoted only on a verified win, so it never regresses.
+    champion_gen: int | None = None
 
     @property
     def json_path(self) -> Path:
@@ -55,6 +59,17 @@ class Ladder:
     def best(self) -> LadderEntry | None:
         return max(self.entries, key=lambda e: e.elo) if self.entries else None
 
+    def champion(self) -> LadderEntry | None:
+        """The served checkpoint: the gated champion, or the best as a fallback."""
+        if self.champion_gen is not None:
+            entry = next((e for e in self.entries if e.gen == self.champion_gen), None)
+            if entry is not None:
+                return entry
+        return self.best()
+
+    def set_champion(self, gen: int) -> None:
+        self.champion_gen = gen
+
     def next_gen(self) -> int:
         return (self.entries[-1].gen + 1) if self.entries else 0
 
@@ -74,6 +89,7 @@ class Ladder:
         self.json_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "random_anchor_elo": self.random_anchor_elo,
+            "champion_gen": self.champion_gen,
             "generations": [asdict(e) for e in self.entries],
         }
         self.json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
@@ -89,4 +105,5 @@ class Ladder:
             run_dir=run_dir,
             random_anchor_elo=data.get("random_anchor_elo", random_anchor_elo),
             entries=entries,
+            champion_gen=data.get("champion_gen"),
         )

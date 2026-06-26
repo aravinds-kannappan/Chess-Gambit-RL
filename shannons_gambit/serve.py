@@ -104,9 +104,10 @@ class ModelServer:
     def agent_for_elo(self, target_elo: float, *, seed: int = 0
                       ) -> tuple[AlphaZeroAgent, LadderEntry]:
         # Serve from the strongest net available (pre-trained base if set, else
-        # the BEST ladder checkpoint -- never a noisy weak generation), then scale
-        # its strength to the requested Elo. ``reference`` is that net's own Elo.
-        entry = self.ladder.best() or self.ladder.latest()
+        # the gated CHAMPION -- a checkpoint that actually beat its predecessor,
+        # never a lucky-noise generation), then scale it to the requested Elo.
+        # ``reference`` is that net's own Elo.
+        entry = self.ladder.champion() or self.ladder.latest()
         if self._base_model is not None:
             model = self._base_model
             reference = self._base_elo
@@ -162,8 +163,8 @@ class ModelServer:
         if seed is None:
             seed = random.randrange(1, 2**31)
         board = chess.Board(fen)
-        best = self.ladder.best()
-        target = elo if elo is not None else (best.elo if best else 1000)
+        champ = self.ladder.champion()
+        target = elo if elo is not None else (champ.elo if champ else 1000)
         router, entry = self.router_for_elo(target, seed=seed)
         mv = router.select_move(board)
         return {
@@ -182,16 +183,18 @@ class ModelServer:
         return self.move(fen, elo=target)
 
     def predict(self, fen: str) -> dict:
-        best = self.ladder.best() or self.ladder.latest()
-        pred = self._predictor(best.gen).predict(chess.Board(fen))
-        return {**pred.to_dict(), "gen": best.gen, "source": "model"}
+        champ = self.ladder.champion() or self.ladder.latest()
+        pred = self._predictor(champ.gen).predict(chess.Board(fen))
+        return {**pred.to_dict(), "gen": champ.gen, "source": "model"}
 
     def ladder_info(self) -> dict:
-        best = self.ladder.best()
+        champ = self.ladder.champion()
         return {
             "generations": len(self.ladder.entries),
-            "best_elo": best.elo if best else None,
-            "calibrated_elo": best.metrics.get("calibrated_elo") if best else None,
+            # The served strength is the champion's, not the noisiest-highest gen.
+            "best_elo": champ.elo if champ else None,
+            "champion_gen": champ.gen if champ else None,
+            "calibrated_elo": champ.metrics.get("calibrated_elo") if champ else None,
             "levels": self.ladder.levels(),
             "elo_curve": self.ladder.elo_curve(),
         }
@@ -212,7 +215,7 @@ class ModelServer:
 
         if find_stockfish(stockfish_path) is None:
             raise RuntimeError("no Stockfish binary; set $STOCKFISH_PATH or install it")
-        best = self.ladder.best() or self.ladder.latest()
+        best = self.ladder.champion() or self.ladder.latest()
         if best is None:
             raise RuntimeError("no checkpoints to calibrate; call ensure_seeded()")
 

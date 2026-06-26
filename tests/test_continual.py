@@ -50,6 +50,48 @@ class TestAnchoredElo(unittest.TestCase):
         even = estimate_rating([(1000.0, 5.0, 10)])
         self.assertAlmostEqual(even, 1000.0, delta=30)
 
+    def test_score_to_elo_delta(self):
+        from shannons_gambit.eval.elo import elo_delta_from_score
+        self.assertAlmostEqual(elo_delta_from_score(0.5), 0.0, delta=1.0)
+        self.assertGreater(elo_delta_from_score(0.75), 100.0)
+        self.assertLess(elo_delta_from_score(0.25), -100.0)
+        # a near-sweep cannot imply an unbounded swing.
+        self.assertLessEqual(elo_delta_from_score(1.0, clamp=200.0), 200.0)
+        self.assertGreaterEqual(elo_delta_from_score(0.0, clamp=200.0), -200.0)
+
+
+class TestGating(unittest.TestCase):
+    """Self-play must never *lower* the served champion's strength."""
+
+    def test_champion_holds_and_no_collapse(self):
+        from dataclasses import replace
+
+        from shannons_gambit.agents.alphazero.continual import ContinualTrainer
+        from shannons_gambit.config import ContinualConfig, NetConfig
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = replace(
+                ContinualConfig(), run_dir=tmp, init_from="",
+                net=NetConfig(channels=8, blocks=1), games_per_gen=2, simulations=4,
+                max_moves=12, eval_games=2, eval_sims=4, batch_size=16,
+                epochs_per_gen=1, device="cpu",
+            )
+            trainer = ContinualTrainer(cfg)
+            entries = [trainer.step() for _ in range(3)]
+
+            self.assertIsNotNone(trainer.ladder.champion_gen)
+            self.assertTrue((Path(tmp) / "champion.pt").exists())
+            champ_elo = trainer.ladder.champion().elo
+            # every generation reports the gating signals, and the champion's Elo
+            # is never below the floor it was first crowned at (anti-collapse).
+            floor = entries[0].elo
+            for e in entries:
+                self.assertIn("promoted", e.metrics)
+                self.assertIn("score_vs_champion", e.metrics)
+            self.assertGreaterEqual(champ_elo, floor - 1e-6)
+            # first gen with no champion is always crowned.
+            self.assertTrue(entries[0].metrics["promoted"])
+
 
 class TestStrengthKnobs(unittest.TestCase):
     def setUp(self):

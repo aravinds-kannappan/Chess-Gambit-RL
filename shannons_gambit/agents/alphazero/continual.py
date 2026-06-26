@@ -111,23 +111,35 @@ class ContinualTrainer:
         # 2) train on the replay buffer
         loss_stats = self._train()
 
-        # 3) anchored-Elo evaluation
-        elo, win_rate_random = self._evaluate()
+        # 3) gate the contender against the champion (+ vs-random sanity check)
+        result = self._evaluate_and_gate()
+        elo = result["elo"]
 
         # 4) version the checkpoint and register it on the ladder
         ckpt = Path(cfg.run_dir) / f"gen-{gen:04d}.pt"
         metrics = {
             "loss_policy": loss_stats.get("loss_policy"),
             "loss_value": loss_stats.get("loss_value"),
-            "win_rate_vs_random": round(win_rate_random, 3),
+            "score_vs_champion": round(result["score_vs_champion"], 3),
+            "win_rate_vs_random": round(result["win_rate_vs_random"], 3),
+            "promoted": result["promoted"],
             "new_examples": new_examples,
         }
         save_model(self.model, str(ckpt), extra={"gen": gen, "elo": elo, "metrics": metrics})
         entry = self.ladder.add(gen, str(ckpt), elo, metrics)
+
+        if result["promoted"]:
+            # the contender earned the crown: it becomes the served champion.
+            self.ladder.set_champion(gen)
+            for name in ("champion.pt", "latest.pt"):
+                save_model(self.model, str(Path(cfg.run_dir) / name),
+                           extra={"gen": gen, "elo": elo, "metrics": metrics})
+        else:
+            # it failed to beat the champion -- roll the weights back so the next
+            # generation self-plays from the champion again. This is what stops
+            # the network from spiralling down into random play.
+            self._restore_champion()
         self.ladder.save()
-        # keep a "latest.pt" pointer for convenience
-        save_model(self.model, str(Path(cfg.run_dir) / "latest.pt"),
-                   extra={"gen": gen, "elo": elo, "metrics": metrics})
         self.logger.log(gen=gen, elo=elo, **metrics)
         return entry
 
@@ -169,36 +181,62 @@ class ContinualTrainer:
             return entry.path
         return str(Path(self.cfg.run_dir) / f"{entry.name}.pt")
 
-    def _evaluate(self) -> tuple[float, float]:
-        """Rate the new net.
+    def _evaluate_and_gate(self) -> dict:
+        """Gauntlet the contender, decide promotion, and place it on the Elo scale.
 
-        Once a baseline exists, rate **relative to the best generation** (head to
-        head) so the ladder fluctuates around the pre-trained baseline as self-play
-        refines or degrades it. Only the very first generation (no baseline) is
-        rated against a fixed random anchor.
-        Returns ``(elo, win_rate_vs_anchor)``.
+        The contender plays a cheap sanity gauntlet vs a fixed random anchor (an
+        honest "can it still beat random?" signal that previously masqueraded as
+        the rating). If a champion exists, the contender's Elo is the champion's
+        plus the *clamped* Elo implied by their head-to-head, and it is promoted
+        only if it scores at least ``gate_threshold`` -- so a noisy or degraded
+        generation can never lower the served strength. Returns a dict with
+        ``elo``, ``score_vs_champion``, ``win_rate_vs_random`` and ``promoted``.
         """
         cfg = self.cfg
         self.model.eval()
-        new_agent = AlphaZeroAgent(self.model, device=self.device, simulations=cfg.eval_sims)
+        contender = AlphaZeroAgent(self.model, device=self.device, simulations=cfg.eval_sims)
 
-        from ...eval.elo import estimate_rating
-
-        best = self.ladder.best()
-        ckpt = self._resolve_ckpt(best) if best is not None else None
-        if best is not None and Path(ckpt).exists():
-            prev_model, _ = load_model(ckpt, map_location=self.device)
-            anchor = AlphaZeroAgent(prev_model.to(self.device), device=self.device,
-                                    simulations=cfg.eval_sims)
-            pts = _match_points(new_agent, anchor, cfg.eval_games, cfg.max_moves)
-            elo = estimate_rating([(best.elo, pts, cfg.eval_games)], init=best.elo)
-            return elo, round(pts / cfg.eval_games, 3)
+        from ...eval.elo import elo_delta_from_score, estimate_rating
 
         random_agent = RandomAgent(seed=123)
-        pts = _match_points(new_agent, random_agent, cfg.eval_games, cfg.max_moves)
-        elo = estimate_rating([(cfg.random_anchor_elo, pts, cfg.eval_games)],
-                              init=cfg.random_anchor_elo + 200)
-        return elo, round(pts / cfg.eval_games, 3)
+        rnd_pts = _match_points(contender, random_agent, cfg.eval_games, cfg.max_moves)
+        win_rate_random = round(rnd_pts / cfg.eval_games, 3)
+
+        champ = self.ladder.champion()
+        champ_ckpt = self._resolve_ckpt(champ) if champ is not None else None
+        if champ is None or champ_ckpt is None or not Path(champ_ckpt).exists():
+            # No champion yet: anchor to the random scale, capped (beating random
+            # proves you are above it, not that you are 2000 -- only a Stockfish
+            # anchor measures that, via serve.calibrate()).
+            elo = estimate_rating([(cfg.random_anchor_elo, rnd_pts, cfg.eval_games)],
+                                  init=cfg.random_anchor_elo + 200)
+            elo = min(elo, cfg.first_gen_elo_cap)
+            return {"elo": elo, "score_vs_champion": 1.0,
+                    "win_rate_vs_random": win_rate_random, "promoted": True}
+
+        prev_model, _ = load_model(champ_ckpt, map_location=self.device)
+        champ_agent = AlphaZeroAgent(prev_model.to(self.device), device=self.device,
+                                     simulations=cfg.eval_sims)
+        pts = _match_points(contender, champ_agent, cfg.eval_games, cfg.max_moves)
+        score = pts / cfg.eval_games
+        delta = elo_delta_from_score(score, clamp=cfg.elo_step_clamp)
+        elo = round(champ.elo + delta, 1)
+        return {"elo": elo, "score_vs_champion": score,
+                "win_rate_vs_random": win_rate_random,
+                "promoted": score >= cfg.gate_threshold}
+
+    def _restore_champion(self) -> None:
+        """Roll the in-place model back to the champion's weights (anti-collapse)."""
+        champ = self.ladder.champion()
+        if champ is None:
+            return
+        path = self._resolve_ckpt(champ)
+        if not Path(path).exists():
+            return
+        model, _ = load_model(path, map_location=self.device)
+        self.model.load_state_dict(model.state_dict())
+        # fresh optimizer so collapse momentum does not carry into the next gen.
+        self.opt = torch.optim.Adam(self.model.parameters(), lr=self.cfg.lr)
 
 
 def run_generations(cfg: ContinualConfig, n_gens: int) -> dict:
