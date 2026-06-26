@@ -77,36 +77,51 @@ def _background_trainer() -> None:
             time.sleep(10)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    if HF_MODEL_REPO:
-        try:
-            from shannons_gambit.export import pull_ladder_from_hub
+def _warmup() -> None:
+    """Pull Hub artifacts OFF the startup path so the app is healthy immediately.
 
-            pull_ladder_from_hub(HF_MODEL_REPO, MODELS_DIR)
-            server.reload()
-        except Exception:  # noqa: BLE001
-            pass
-        try:  # learned opening book (served for the first plies); optional
-            from shannons_gambit.export import pull_opening_book
+    A blocking startup that downloads the ladder + every checkpoint can take many
+    minutes (the ladder can hold thousands of generations); HF's health check then
+    times out and the Space restart-loops. Doing it in a daemon thread lets uvicorn
+    answer /healthz at once and the served net swaps in as each piece lands.
+    """
+    try:
+        from shannons_gambit.export import pull_ladder_from_hub
 
-            pull_opening_book(HF_MODEL_REPO, MODELS_DIR)
-            server.reload()
-        except Exception:  # noqa: BLE001
-            pass
-        # Serve from the strong pre-trained net (pretrain/model.pt), scaled to the
-        # target Elo, instead of weak self-play generations. This is what makes
-        # graded play actually track the requested Elo.
-        try:
-            from shannons_gambit.export import pull_base_model
+        pull_ladder_from_hub(HF_MODEL_REPO, MODELS_DIR)
+        server.reload()
+    except Exception as exc:  # noqa: BLE001
+        print("ladder pull skipped:", exc, flush=True)
+    try:  # learned opening book (served for the first plies); optional
+        from shannons_gambit.export import pull_opening_book
 
-            base = pull_base_model(HF_MODEL_REPO, MODELS_DIR)
-            if base:
-                server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
-        except Exception as exc:  # noqa: BLE001
-            print("base model load skipped:", exc, flush=True)
+        pull_opening_book(HF_MODEL_REPO, MODELS_DIR)
+        server.reload()
+    except Exception as exc:  # noqa: BLE001
+        print("book pull skipped:", exc, flush=True)
+    # Serve from the strong pre-trained net (pretrain/model.pt), scaled to the
+    # target Elo, instead of weak self-play generations.
+    try:
+        from shannons_gambit.export import pull_base_model
+
+        base = pull_base_model(HF_MODEL_REPO, MODELS_DIR)
+        if base:
+            server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
+    except Exception as exc:  # noqa: BLE001
+        print("base model load skipped:", exc, flush=True)
     server.ensure_seeded()
     if TRAIN_ENABLED:
+        _background_trainer()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Seed something servable instantly (local, no network), then warm up from the
+    # Hub in the background so the Space passes its health check right away.
+    server.ensure_seeded()
+    if HF_MODEL_REPO:
+        threading.Thread(target=_warmup, daemon=True).start()
+    elif TRAIN_ENABLED:
         threading.Thread(target=_background_trainer, daemon=True).start()
     yield
 

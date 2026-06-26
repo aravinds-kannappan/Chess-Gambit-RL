@@ -1,9 +1,12 @@
 # Hugging Face Space (Docker) - trains + serves Shannon's Gambit agents.
 FROM python:3.11-slim
 
+# Serve-only by default: a CPU Space that also self-plays starves the web server,
+# so /healthz times out and the Space restart-loops. Train on HF Jobs instead
+# (deploy/hf_job). Override TRAIN_ENABLED=1 only on a Space you don't serve from.
 ENV PYTHONUNBUFFERED=1 \
     MODELS_DIR=/data/models \
-    TRAIN_ENABLED=1 \
+    TRAIN_ENABLED=0 \
     STOCKFISH_PATH=/usr/games/stockfish
 
 WORKDIR /app

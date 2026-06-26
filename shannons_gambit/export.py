@@ -41,12 +41,14 @@ def push_ladder_to_hub(repo_id: str, run_dir: str, *, keep_last: int = 12) -> st
     return f"https://huggingface.co/{repo_id}"
 
 
-def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
-    """Download ladder.json + its checkpoints from a HF model repo into ``run_dir``.
+def pull_ladder_from_hub(repo_id: str, run_dir: str, *, max_checkpoints: int = 8) -> bool:
+    """Download ladder.json + the *served* checkpoints from a HF model repo.
 
-    Checkpoints are read from ``checkpoints/`` (falling back to the repo root for
-    older layouts) and flattened into ``run_dir`` so the server finds them by name.
-    Returns True if a ladder was found. Best-effort; returns False on any failure.
+    Only the checkpoints that can actually be served are fetched: the gated
+    champion, the highest-Elo entry, and the most recent ``max_checkpoints``
+    generations. Pulling every historical generation (the ladder can hold
+    thousands) is what made the Space hang in startup and restart-loop. Files are
+    flattened into ``run_dir`` so the server finds them by name. Best-effort.
     """
     from huggingface_hub import hf_hub_download
 
@@ -57,7 +59,15 @@ def pull_ladder_from_hub(repo_id: str, run_dir: str) -> bool:
     except Exception:
         return False
     data = json.loads(Path(ladder_path).read_text())
-    for gen in data.get("generations", []):
+    gens = data.get("generations", [])
+    wanted = {g["gen"] for g in gens[-max_checkpoints:]}
+    if data.get("champion_gen") is not None:
+        wanted.add(data["champion_gen"])
+    if gens:  # the entry serve.predict()/best() would resolve to
+        wanted.add(max(gens, key=lambda g: g.get("elo", 0))["gen"])
+    for gen in gens:
+        if gen["gen"] not in wanted:
+            continue
         name = f"{gen['name']}.pt"
         # current layout, then legacy folders, then bare repo root
         repo_paths = [f"{CKPT_DIR}/{name}", *[f"{d}/{name}" for d in _LEGACY_CKPT_DIRS], name]
