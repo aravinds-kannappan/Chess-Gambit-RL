@@ -6,10 +6,9 @@ import { useEffect, useState } from "react";
 type Ladder = { generations?: number; best_elo?: number | null; calibrated_elo?: number | null; levels?: number[] };
 
 const TILES = [
-  { href: "/play", ic: "♟", h: "Play & grow", p: "An agent that meets your level and adapts. Competitive Mode goes tournament-strong.", c: "rgba(245,166,35,0.5)" },
-  { href: "/tiers", ic: "⚔", h: "Arena tiers", p: "Many agent-vs-agent games at once across Elo tiers, streaming data back to train.", c: "rgba(176,109,255,0.5)" },
-  { href: "/research", ic: "📈", h: "Live dashboard", p: "Elo per generation, Stockfish-calibrated ratings, loss curves, info-theory.", c: "rgba(109,176,255,0.5)" },
-  { href: "/predict", ic: "🔮", h: "Predict", p: "Streaming move recommendations for your live game, plus any custom position.", c: "rgba(63,185,80,0.5)" },
+  { href: "/play", ic: "♟", h: "Play", p: "An opponent that meets your level and adapts to how you play.", c: "rgba(245,166,35,0.5)" },
+  { href: "/watch", ic: "♛", h: "Watch", p: "Pit two agents at the Elos you choose - or watch every tier at once.", c: "rgba(176,109,255,0.5)" },
+  { href: "/research", ic: "♚", h: "Dashboard", p: "The Elo ladder, Stockfish-calibrated ratings, and per-phase accuracy.", c: "rgba(109,176,255,0.5)" },
 ];
 
 export default function Home() {
@@ -39,17 +38,16 @@ export default function Home() {
   return (
     <main className="container">
       <section className="hero">
-        <span className="eyebrow">MDP · PPO · Reward · Stockfish-rated</span>
-        <h1 className="title">Chess agents that<br /><span>learn as they play</span></h1>
+        <span className="eyebrow">A chess AI that adapts to you</span>
+        <h1 className="title">Play chess against<br /><span>an engine that learns</span></h1>
         <p className="subtitle">
-          A multi-agent engine that routes each position to the right method - exact
-          dynamic programming in the endgame, learned RL in the middlegame - while
-          Stockfish grades every agent on a real Elo scale.
+          Pick your level and play. An opening book and a trained network handle the
+          opening and middlegame; exact endgame solvers finish the job - and Stockfish
+          grades the whole thing on a real Elo scale.
         </p>
         <div className="cta-row">
-          <Link href="/play" className="btn">Play an agent</Link>
-          <Link href="/tiers" className="btn accent2">Watch the tiers</Link>
-          <Link href="/research" className="btn secondary">Live dashboard</Link>
+          <Link href="/play" className="btn">Play now</Link>
+          <Link href="/watch" className="btn accent2">Watch a duel</Link>
         </div>
       </section>
 
@@ -60,8 +58,7 @@ export default function Home() {
         <div className="card stat"><div className="num"><span className={`badge ${live ? "live" : ""}`}>{live ? "live" : "warming"}</span></div><div className="label">Backend</div></div>
       </div>
 
-      <h2 className="section-title"><span className="no">01</span>Step onto the board</h2>
-      <div className="deck">
+      <div className="deck" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginTop: "2rem" }}>
         {TILES.map((t) => (
           <Link key={t.href} href={t.href} className="tile">
             <span className="glowdot" style={{ background: t.c }} />
@@ -72,26 +69,25 @@ export default function Home() {
         ))}
       </div>
 
-      <h2 className="section-title"><span className="no">02</span>How it works</h2>
-      <div className="grid cols-2">
-        <div className="card">
-          <h2>One board, many minds</h2>
-          <ul className="muted">
-            <li><b>MDP agent</b> - exact Bellman optimal play in solved endgames (KRvK, KQvK).</li>
-            <li><b>PPO &amp; reward agents</b> - on-policy and off-policy RL for the low-material regime.</li>
-            <li><b>Neural net</b> - AlphaZero-lite self-play for the opening and middlegame.</li>
-            <li>A <b>phase router</b> hands each position to the agent that owns it.</li>
-          </ul>
-        </div>
-        <div className="card">
-          <h2>Stockfish is the referee</h2>
-          <ul className="muted">
-            <li>The agents <b>never</b> use Stockfish to choose a move.</li>
-            <li>A backend evaluator scores each agent separately: <b>centipawn loss</b>, top-1 agreement, and a <b>calibrated Elo</b> from gauntlets vs throttled Stockfish.</li>
-            <li>That rating is what each agent plays at - and climbs as it learns.</li>
-          </ul>
-        </div>
+      <div className="card" style={{ marginTop: "2rem" }}>
+        <h2>How it works</h2>
+        <ul className="muted" style={{ margin: 0 }}>
+          <li>A <b>phase router</b> hands each position to the right method: an
+            <b> opening book</b> for the first moves, a <b>trained network</b> for the
+            middlegame, and <b>exact Bellman solvers</b> in the endgame.</li>
+          <li>The network is pre-trained on real Lichess games, then refined by
+            self-play with <b>champion gating</b> - a new generation is only served if
+            it actually beats the current one, so strength never regresses.</li>
+          <li><b>Stockfish is only the referee</b>: the agents never use it to choose a
+            move; it grades them (centipawn loss, per-phase accuracy, calibrated Elo).</li>
+        </ul>
       </div>
+
+      <p className="muted" style={{ marginTop: "1.4rem", fontSize: "0.9rem" }}>
+        More: <Link href="/predict">Predict a position</Link> ·{" "}
+        <Link href="/tiers">Live agent tiers</Link> ·{" "}
+        <Link href="/arena">Challenge ladder</Link>
+      </p>
     </main>
   );
 }

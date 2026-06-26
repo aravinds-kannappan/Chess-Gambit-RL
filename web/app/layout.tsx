@@ -9,14 +9,12 @@ export const metadata: Metadata = {
 };
 
 // Deterministic floating-piece field (no random at render -> no hydration drift).
+// Kept sparse on purpose -- a few drifting glyphs read as ambient, a crowd reads
+// as clutter.
 const PIECES = [
-  { g: "♞", left: "6%", delay: "0s", dur: "26s", size: "3rem" },
-  { g: "♜", left: "18%", delay: "6s", dur: "32s", size: "2.4rem" },
-  { g: "♛", left: "32%", delay: "11s", dur: "29s", size: "4rem" },
-  { g: "♙", left: "46%", delay: "3s", dur: "24s", size: "2rem" },
-  { g: "♚", left: "61%", delay: "9s", dur: "34s", size: "4.2rem" },
-  { g: "♝", left: "74%", delay: "15s", dur: "28s", size: "2.8rem" },
-  { g: "♞", left: "88%", delay: "2s", dur: "30s", size: "3.4rem" },
+  { g: "♞", left: "14%", delay: "0s", dur: "30s", size: "2.8rem" },
+  { g: "♛", left: "52%", delay: "9s", dur: "34s", size: "3.4rem" },
+  { g: "♚", left: "82%", delay: "4s", dur: "32s", size: "3rem" },
 ];
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -39,11 +37,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             Shannon&apos;s <span>Gambit</span>
           </Link>
           <Link href="/play" className="link">Play</Link>
-          <Link href="/tiers" className="link">Tiers</Link>
           <Link href="/watch" className="link">Watch</Link>
           <Link href="/research" className="link">Dashboard</Link>
           <Link href="/predict" className="link">Predict</Link>
-          <Link href="/arena" className="link">Ladder</Link>
           <span style={{ flex: 1 }} />
           <a
             href="https://github.com/aravinds-kannappan/Chess-Gambit-RL"

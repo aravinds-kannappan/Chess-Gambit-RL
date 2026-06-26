@@ -62,9 +62,12 @@ export default function WatchPage() {
   return (
     <main className="container">
       <h1 className="title" style={{ fontSize: "2rem" }}>Featured <span>duel</span></h1>
-      <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 1.3rem" }}>
+      <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 0.6rem" }}>
         Two agents at the Elos you choose. Trained-network moves when the backend is
         live, otherwise the Elo-scaled engine - so strength always tracks the dial.
+      </p>
+      <p className="muted" style={{ margin: "0 0 1.3rem", fontSize: "0.9rem" }}>
+        Prefer a panorama? <a href="/tiers">Watch every Elo tier at once →</a>
       </p>
 
       <div className="card" style={{ marginBottom: "1.2rem" }}>

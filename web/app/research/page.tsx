@@ -107,8 +107,8 @@ export default function DashboardPage() {
         </div>
         <p className="muted">
           The orange line is each self-play generation (noisy on a free CPU); the blue
-          line is the best reached so far. Served play uses the best net, scaled to your
-          chosen Elo - not a random weak generation.
+          line is the gated champion - it only rises when a generation actually beats the
+          current one. Served play always uses that champion, scaled to your chosen Elo.
         </p>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={curve}>
