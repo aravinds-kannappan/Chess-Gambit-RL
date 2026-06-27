@@ -224,6 +224,16 @@ class ContinualConfig:
     # anchor but cap the result here (beating a random mover proves you are
     # *above* it, not that you are 2000 -- only a Stockfish anchor measures that).
     first_gen_elo_cap: float = 1000.0
+    # Hybrid post-training: replay human (SFT) data alongside self-play so the net
+    # refines toward strong human play instead of drifting. ``sft_data_dir`` is a
+    # built dataset dir (with a positions/ shard folder); empty = pure self-play
+    # (the original behaviour). ``sft_ratio`` is the fraction of train batches
+    # drawn from the human data. ``kl_coef`` optionally anchors the policy to the
+    # init/pretrain net (KL penalty) -- 0 disables it.
+    sft_data_dir: str = ""
+    sft_ratio: float = 0.5
+    sft_max_positions: int = 200_000
+    kl_coef: float = 0.0
     device: str = "auto"
     seed: int = 0
 

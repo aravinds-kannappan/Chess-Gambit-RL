@@ -88,6 +88,32 @@ class ContinualTrainer:
         self.replay: deque[Example] = deque(maxlen=cfg.buffer_games * cfg.max_moves)
         self.ladder = Ladder.load(cfg.run_dir, random_anchor_elo=cfg.random_anchor_elo)
         self.logger = JsonlLogger(Path(cfg.run_dir), config=cfg)
+        # hybrid post-training: human (SFT) data replayed alongside self-play, and
+        # an optional frozen reference net to KL-anchor the policy to human play.
+        self._sft = self._load_sft(cfg)
+        self._ref_model = self._load_ref(cfg) if cfg.kl_coef > 0 else None
+
+    def _load_sft(self, cfg: ContinualConfig) -> dict | None:
+        if not cfg.sft_data_dir:
+            return None
+        try:
+            from ...data.dataset import PositionDataset, load_records
+
+            recs = load_records(cfg.sft_data_dir, max_positions=cfg.sft_max_positions)
+            ds = PositionDataset(recs)
+            return {"x": ds.x, "policy": ds.policy, "value": ds.value}
+        except Exception as exc:  # noqa: BLE001 - missing/empty data -> pure self-play
+            print("SFT data load skipped:", exc, flush=True)
+            return None
+
+    def _load_ref(self, cfg: ContinualConfig) -> ChessNet | None:
+        if not (cfg.init_from and Path(cfg.init_from).exists()):
+            return None
+        ref, _ = load_model(cfg.init_from, map_location=self.device)
+        ref = ref.to(self.device).eval()
+        for p in ref.parameters():
+            p.requires_grad_(False)
+        return ref
 
     # --- one generation ----------------------------------------------------
     def step(self) -> LadderEntry:
@@ -124,6 +150,7 @@ class ContinualTrainer:
             "win_rate_vs_random": round(result["win_rate_vs_random"], 3),
             "promoted": result["promoted"],
             "new_examples": new_examples,
+            "sft_batches": loss_stats.get("sft_batches"),
         }
         save_model(self.model, str(ckpt), extra={"gen": gen, "elo": elo, "metrics": metrics})
         entry = self.ladder.add(gen, str(ckpt), elo, metrics)
@@ -147,33 +174,79 @@ class ContinualTrainer:
         return [self.step() for _ in range(n_gens)]
 
     # --- internals ---------------------------------------------------------
+    def _rl_batch(self, data: list[Example]):
+        """A self-play RL batch: policy target = MCTS visits, value = game result."""
+        cfg = self.cfg
+        idx = self.rng.integers(0, len(data), size=cfg.batch_size)
+        batch = [data[i] for i in idx]
+        x = torch.from_numpy(np.stack([b.state for b in batch])).float().to(self.device)
+        pi = torch.from_numpy(np.stack([b.policy for b in batch])).float().to(self.device)
+        z = torch.tensor([b.value for b in batch], dtype=torch.float32, device=self.device)
+        out = self.model(x)
+        logp = torch.log_softmax(out["policy"], dim=1)
+        loss_policy = -(pi * logp).sum(dim=1).mean()
+        loss_value = ((out["value"] - z) ** 2).mean()
+        return loss_policy, loss_value, x, out["policy"]
+
+    def _sft_batch(self):
+        """A human (SFT) batch: policy target = move actually played, value = result."""
+        cfg = self.cfg
+        sft = self._sft
+        idx = self.rng.integers(0, len(sft["value"]), size=cfg.batch_size)
+        x = torch.from_numpy(sft["x"][idx]).float().to(self.device)
+        moves = torch.from_numpy(sft["policy"][idx]).long().to(self.device)
+        z = torch.from_numpy(sft["value"][idx]).float().to(self.device)
+        out = self.model(x)
+        loss_policy = nn.functional.cross_entropy(out["policy"], moves)
+        loss_value = ((out["value"] - z) ** 2).mean()
+        return loss_policy, loss_value, x, out["policy"]
+
+    def _kl_to_ref(self, logits: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+        """KL(current policy || frozen reference policy) -- anchors to human play."""
+        with torch.no_grad():
+            ref_logp = torch.log_softmax(self._ref_model(x)["policy"], dim=1)
+        logp = torch.log_softmax(logits, dim=1)
+        return (logp.exp() * (logp - ref_logp)).sum(dim=1).mean()
+
     def _train(self) -> dict:
         cfg = self.cfg
-        if len(self.replay) < cfg.batch_size:
+        have_rl = len(self.replay) >= cfg.batch_size
+        have_sft = self._sft is not None and len(self._sft["value"]) >= cfg.batch_size
+        if not have_rl and not have_sft:
             return {"loss_policy": None, "loss_value": None}
         self.model.train()
-        data = list(self.replay)
-        n_batches = max(1, len(data) // cfg.batch_size) * cfg.epochs_per_gen
-        tot_p = tot_v = 0.0
+        rl_data = list(self.replay) if have_rl else []
+        ref_n = max(len(rl_data), len(self._sft["value"]) if have_sft else 0)
+        n_batches = max(1, ref_n // cfg.batch_size) * cfg.epochs_per_gen
+        tot_p = tot_v = tot_kl = 0.0
+        n_sft = n_rl = 0
         for _ in range(n_batches):
-            idx = self.rng.integers(0, len(data), size=cfg.batch_size)
-            batch = [data[i] for i in idx]
-            x = torch.from_numpy(np.stack([b.state for b in batch])).float().to(self.device)
-            pi = torch.from_numpy(np.stack([b.policy for b in batch])).float().to(self.device)
-            z = torch.tensor([b.value for b in batch], dtype=torch.float32, device=self.device)
-            out = self.model(x)
-            logp = torch.log_softmax(out["policy"], dim=1)
-            loss_policy = -(pi * logp).sum(dim=1).mean()
-            loss_value = ((out["value"] - z) ** 2).mean()
+            # mix human SFT and self-play RL batches by sft_ratio (fall back to
+            # whichever data is available).
+            use_sft = have_sft and (not have_rl or self.rng.random() < cfg.sft_ratio)
+            if use_sft:
+                loss_policy, loss_value, x, logits = self._sft_batch()
+                n_sft += 1
+            else:
+                loss_policy, loss_value, x, logits = self._rl_batch(rl_data)
+                n_rl += 1
             loss = loss_policy + loss_value
+            if self._ref_model is not None:
+                kl = self._kl_to_ref(logits, x)
+                loss = loss + cfg.kl_coef * kl
+                tot_kl += float(kl.detach())
             self.opt.zero_grad()
             loss.backward()
             nn.utils.clip_grad_norm_(self.model.parameters(), 5.0)
             self.opt.step()
             tot_p += float(loss_policy.detach())
             tot_v += float(loss_value.detach())
-        return {"loss_policy": round(tot_p / n_batches, 4),
-                "loss_value": round(tot_v / n_batches, 4)}
+        stats = {"loss_policy": round(tot_p / n_batches, 4),
+                 "loss_value": round(tot_v / n_batches, 4),
+                 "sft_batches": n_sft, "rl_batches": n_rl}
+        if self._ref_model is not None:
+            stats["kl_to_ref"] = round(tot_kl / n_batches, 4)
+        return stats
 
     def _resolve_ckpt(self, entry) -> str:
         """Checkpoint path: stored path, else by name in the run dir (Hub-pulled)."""

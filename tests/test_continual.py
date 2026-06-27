@@ -93,6 +93,59 @@ class TestGating(unittest.TestCase):
             self.assertTrue(entries[0].metrics["promoted"])
 
 
+class TestHybridPosttrain(unittest.TestCase):
+    """Self-play that also replays human SFT data (and KL-anchors to pretrain)."""
+
+    def test_sft_replay_and_kl(self):
+        from dataclasses import replace
+
+        from shannons_gambit.agents.alphazero.continual import ContinualTrainer
+        from shannons_gambit.config import ContinualConfig, DataConfig, NetConfig
+        from shannons_gambit.data.dataset import build_dataset
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data_dir = str(Path(tmp) / "data")
+            built = build_dataset(replace(DataConfig(), out_dir=data_dir,
+                                          max_games=200, min_elo=0))
+            self.assertGreater(built["positions"], 0)
+            # a tiny init/pretrain net so init_from load + KL reference both work.
+            net = NetConfig(channels=8, blocks=1)
+            init = Path(tmp) / "pretrain.pt"
+            save_model(ChessNet(channels=8, blocks=1), str(init), extra={})
+
+            cfg = replace(
+                ContinualConfig(), run_dir=str(Path(tmp) / "run"), init_from=str(init),
+                net=net, games_per_gen=1, simulations=4, max_moves=8, eval_games=1,
+                eval_sims=4, batch_size=16, epochs_per_gen=1,
+                sft_data_dir=data_dir, sft_ratio=1.0, kl_coef=0.5, device="cpu",
+            )
+            trainer = ContinualTrainer(cfg)
+            self.assertIsNotNone(trainer._sft)        # human data loaded
+            self.assertIsNotNone(trainer._ref_model)  # KL reference loaded
+            entry = trainer.step()
+            # with sft_ratio=1.0 every train batch is a human SFT batch.
+            self.assertGreater(entry.metrics.get("sft_batches") or 0, 0)
+            self.assertIsNotNone(entry.metrics.get("loss_policy"))
+
+    def test_pure_selfplay_still_works(self):
+        from dataclasses import replace
+
+        from shannons_gambit.agents.alphazero.continual import ContinualTrainer
+        from shannons_gambit.config import ContinualConfig, NetConfig
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = replace(
+                ContinualConfig(), run_dir=tmp, init_from="",
+                net=NetConfig(channels=8, blocks=1), games_per_gen=2, simulations=4,
+                max_moves=12, eval_games=1, eval_sims=4, batch_size=16,
+                epochs_per_gen=1, device="cpu",  # sft_data_dir="" -> pure self-play
+            )
+            trainer = ContinualTrainer(cfg)
+            self.assertIsNone(trainer._sft)
+            self.assertIsNone(trainer._ref_model)
+            trainer.step()  # must not raise
+
+
 class TestStrengthKnobs(unittest.TestCase):
     def setUp(self):
         self.model = ChessNet(channels=8, blocks=1)

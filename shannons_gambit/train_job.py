@@ -26,6 +26,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--games-per-gen", type=int, default=64, dest="games_per_gen")
     p.add_argument("--simulations", type=int, default=200)
     p.add_argument("--eval-games", type=int, default=40, dest="eval_games")
+    # hybrid post-training: replay the human SFT data during self-play
+    p.add_argument("--sft-ratio", type=float, default=0.5, dest="sft_ratio",
+                   help="fraction of self-play train batches drawn from human data (0=off)")
+    p.add_argument("--kl-coef", type=float, default=0.0, dest="kl_coef",
+                   help="KL anchor of the self-play policy to the pretrain net (0=off)")
     p.add_argument("--hf-repo", default="legacyaravind/shannons-gambit", dest="hf_repo")
     args = p.parse_args(argv)
 
@@ -78,7 +83,8 @@ def main(argv: list[str] | None = None) -> None:
                                   init_from="runs/supervised/model.pt", net=net,
                                   games_per_gen=args.games_per_gen,
                                   simulations=args.simulations, eval_games=args.eval_games,
-                                  device="auto"), args.selfplay_gens)
+                                  sft_data_dir="data", sft_ratio=args.sft_ratio,
+                                  kl_coef=args.kl_coef, device="auto"), args.selfplay_gens)
     print("elo curve:", res["elo_curve"], flush=True)
 
     # 6) publish the gated ladder (posttrain/ generations)
