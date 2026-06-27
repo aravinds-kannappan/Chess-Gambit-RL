@@ -48,6 +48,20 @@ class GameStore {
   history() { return this.game.history(); }
   moveCount() { return this.game.history().length; }
 
+  // legal destination squares from a square (for move hints / click-to-move)
+  movesFrom(square: string): string[] {
+    try {
+      return this.game.moves({ square: square as never, verbose: true }).map((m: { to: string }) => m.to);
+    } catch { return []; }
+  }
+
+  // from/to of the most recent move (for last-move highlighting)
+  lastMove(): { from: string; to: string } | null {
+    const h = this.game.history({ verbose: true }) as { from: string; to: string }[];
+    const m = h[h.length - 1];
+    return m ? { from: m.from, to: m.to } : null;
+  }
+
   result(): string | null {
     if (!this.game.isGameOver()) return null;
     if (this.game.isCheckmate()) return this.game.turn() === "w" ? "0-1" : "1-0";

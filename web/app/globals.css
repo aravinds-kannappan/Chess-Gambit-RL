@@ -32,12 +32,19 @@ html, body {
   font-family: "Space Grotesk", ui-sans-serif, system-ui, -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
-body {
+body { background: var(--bg); }
+/* Composited fixed layer instead of `background-attachment: fixed` (which forces
+   a full repaint on every scroll frame -> the scroll jank). A position:fixed
+   element is painted once and just composited, so scrolling stays smooth. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
   background:
     radial-gradient(900px 620px at 88% -12%, rgba(232, 163, 61, 0.07), transparent 60%),
-    radial-gradient(760px 520px at -5% 112%, rgba(120, 140, 255, 0.05), transparent 60%),
-    var(--bg);
-  background-attachment: fixed;
+    radial-gradient(760px 520px at -5% 112%, rgba(120, 140, 255, 0.05), transparent 60%);
 }
 a { color: inherit; text-decoration: none; }
 a:hover { text-decoration: none; }
@@ -48,8 +55,7 @@ a:hover { text-decoration: none; }
   display: flex; align-items: center; gap: 1.7rem;
   padding: 1.05rem 2rem;
   border-bottom: 1px solid var(--hair);
-  background: rgba(10, 10, 11, 0.72);
-  backdrop-filter: blur(10px);
+  background: rgba(12, 12, 14, 0.94); /* solid: backdrop-filter on a sticky bar repaints on scroll */
 }
 .nav .brand { font-weight: 700; letter-spacing: -0.02em; font-size: 1.02rem; margin-right: 0.3rem; }
 .nav .brand span { color: var(--accent); }

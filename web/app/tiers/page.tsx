@@ -101,9 +101,9 @@ function TierBoard({
         position={fen}
         arePiecesDraggable={false}
         boardWidth={240}
-        customBoardStyle={{ borderRadius: "10px" }}
-        customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
-        customLightSquareStyle={{ backgroundColor: "#cdd6e6" }}
+        customBoardStyle={{ borderRadius: "8px" }}
+        customDarkSquareStyle={{ backgroundColor: "#26241f" }}
+        customLightSquareStyle={{ backgroundColor: "#cbb78f" }}
       />
       <div className="row" style={{ justifyContent: "space-between", marginTop: "0.5rem" }}>
         <span className="pill mono">move {moveCount}</span>

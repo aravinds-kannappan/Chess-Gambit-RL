@@ -13,6 +13,7 @@ export default function PredictPage() {
   const [customFen, setCustomFen] = useState(START_FEN);
   type Pred = { bestMove: string; wdl: { win: number; draw: number; loss: number }; rating: number; value: number };
   const [pred, setPred] = useState<Pred | null>(null);
+  const [hover, setHover] = useState<string | null>(null);
 
   const liveFen = gameStore.fen();
   const fen = mode === "live" ? liveFen : customFen;
@@ -46,14 +47,22 @@ export default function PredictPage() {
   const span = recs.length ? Math.max(0.6, recs[0].score - lo) : 1;
   const whiteHeight = Math.round(((Math.max(-6, Math.min(6, evalP)) + 6) / 12) * 100);
 
+  // board arrows: amber = trained-net best move, blue = hovered/top engine rec
+  const arrows: [string, string, string?][] = [];
+  if (pred?.bestMove && pred.bestMove.length >= 4)
+    arrows.push([pred.bestMove.slice(0, 2), pred.bestMove.slice(2, 4), "#e8a33d"]);
+  const previewUci = hover ?? recs[0]?.uci;
+  if (previewUci && previewUci.length >= 4 && previewUci !== pred?.bestMove)
+    arrows.push([previewUci.slice(0, 2), previewUci.slice(2, 4), "#6db0ff"]);
+
   return (
     <main className="container">
       <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
         <h1 className="title" style={{ fontSize: "2rem" }}>Move <span>recommendations</span></h1>
         <div className="row">
-          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "live" ? "var(--accent2)" : undefined }}
+          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "live" ? "var(--accent)" : undefined, color: mode === "live" ? "var(--text)" : undefined }}
             onClick={() => setMode("live")}>Live game</span>
-          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "custom" ? "var(--accent2)" : undefined }}
+          <span className="chip" style={{ cursor: "pointer", borderColor: mode === "custom" ? "var(--accent)" : undefined, color: mode === "custom" ? "var(--text)" : undefined }}
             onClick={() => setMode("custom")}>Custom FEN</span>
         </div>
       </div>
@@ -69,9 +78,10 @@ export default function PredictPage() {
             <div className="evalbar"><i style={{ height: `${whiteHeight}%` }} /></div>
             <div style={{ flex: 1 }}>
               <Chessboard position={fen} arePiecesDraggable={false} boardWidth={460}
-                customBoardStyle={{ borderRadius: "12px" }}
-                customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
-                customLightSquareStyle={{ backgroundColor: "#cdd6e6" }} />
+                customArrows={arrows as never}
+                customBoardStyle={{ borderRadius: "10px" }}
+                customDarkSquareStyle={{ backgroundColor: "#26241f" }}
+                customLightSquareStyle={{ backgroundColor: "#cbb78f" }} />
             </div>
           </div>
           {mode === "custom" ? (
@@ -96,12 +106,18 @@ export default function PredictPage() {
             <div style={{ marginTop: "0.7rem" }}>
               {recs.length === 0 && <p className="muted">No legal moves - game over.</p>}
               {recs.map((r, i) => (
-                <div key={r.uci} className={`rec ${i === 0 ? "top" : ""}`}>
+                <div key={r.uci} className={`rec ${i === 0 ? "top" : ""}`} style={{ cursor: "pointer" }}
+                  onMouseEnter={() => setHover(r.uci)} onMouseLeave={() => setHover(null)}>
                   <span className="san">{r.san}</span>
                   <span className="meter"><span style={{ width: `${Math.round(((r.score - lo) / span) * 100)}%` }} /></span>
                   <span className="sc">{r.score >= 0 ? "+" : ""}{r.score.toFixed(2)}</span>
                 </div>
               ))}
+              {recs.length > 0 && (
+                <p className="pill" style={{ marginTop: "0.5rem" }}>
+                  hover a move to preview it · <span style={{ color: "#e8a33d" }}>amber</span> = network&apos;s pick
+                </p>
+              )}
             </div>
           </div>
 

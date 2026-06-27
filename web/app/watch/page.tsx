@@ -92,9 +92,9 @@ export default function WatchPage() {
             <div className="evalbar"><i style={{ height: `${whiteHeight}%` }} /></div>
             <div style={{ flex: 1 }}>
               <Chessboard position={fen} arePiecesDraggable={false} boardWidth={460}
-                customBoardStyle={{ borderRadius: "12px" }}
-                customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
-                customLightSquareStyle={{ backgroundColor: "#cdd6e6" }} />
+                customBoardStyle={{ borderRadius: "10px" }}
+                customDarkSquareStyle={{ backgroundColor: "#26241f" }}
+                customLightSquareStyle={{ backgroundColor: "#cbb78f" }} />
             </div>
           </div>
           <p className="pill" style={{ marginTop: "0.6rem" }}>

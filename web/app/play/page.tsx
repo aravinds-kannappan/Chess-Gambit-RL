@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { Chessboard } from "react-chessboard";
 import { agentMove, evalPawns } from "@/app/lib/engine";
 import { gameStore, useGameVersion } from "@/app/lib/game";
@@ -41,6 +41,7 @@ export default function PlayPage() {
   const [src, setSrc] = useState<{ source: string; route?: string; elo: number } | null>(null);
   const [history, setHistory] = useState<number[]>([]);
   const [adaptInfo, setAdaptInfo] = useState("");
+  const [sel, setSel] = useState<string | null>(null);
 
   const targetElo = competitive ? 2300 : userElo;
   const fen = gameStore.fen();
@@ -77,9 +78,36 @@ export default function PlayPage() {
   const onDrop = useCallback((from: string, to: string) => {
     if (gameStore.turn() !== "w" || thinking) return false;
     if (!gameStore.tryUserMove(from, to)) return false;
+    setSel(null);
     void reply();
     return true;
   }, [reply, thinking]);
+
+  // click-to-move: click a piece to see its legal squares, click one to move
+  const onSquareClick = useCallback((square: string) => {
+    if (gameStore.turn() !== "w" || thinking) return;
+    if (sel && gameStore.movesFrom(sel).includes(square)) {
+      if (gameStore.tryUserMove(sel, square)) { setSel(null); void reply(); }
+      return;
+    }
+    setSel(gameStore.movesFrom(square).length > 0 ? square : null);
+  }, [sel, thinking, reply]);
+
+  const onDragBegin = useCallback((_piece: string, square: string) => { setSel(square); }, []);
+
+  // last-move highlight, selected square, and legal-target dots
+  const last = gameStore.lastMove();
+  const squareStyles: Record<string, CSSProperties> = {};
+  if (last) {
+    squareStyles[last.from] = { background: "rgba(232,163,61,0.16)" };
+    squareStyles[last.to] = { background: "rgba(232,163,61,0.28)" };
+  }
+  if (sel) {
+    squareStyles[sel] = { background: "rgba(232,163,61,0.38)" };
+    for (const t of gameStore.movesFrom(sel)) {
+      squareStyles[t] = { background: "radial-gradient(circle, rgba(232,163,61,0.55) 22%, transparent 24%)" };
+    }
+  }
 
   const retrain = async () => {
     setAdaptInfo("Fine-tuning on your games...");
@@ -110,11 +138,14 @@ export default function PlayPage() {
               <Chessboard
                 position={fen}
                 onPieceDrop={onDrop}
+                onSquareClick={onSquareClick}
+                onPieceDragBegin={onDragBegin}
+                customSquareStyles={squareStyles}
                 boardWidth={460}
                 arePiecesDraggable={gameStore.turn() === "w" && !thinking}
-                customBoardStyle={{ borderRadius: "12px" }}
-                customDarkSquareStyle={{ backgroundColor: "#2b3344" }}
-                customLightSquareStyle={{ backgroundColor: "#cdd6e6" }}
+                customBoardStyle={{ borderRadius: "10px" }}
+                customDarkSquareStyle={{ backgroundColor: "#26241f" }}
+                customLightSquareStyle={{ backgroundColor: "#cbb78f" }}
               />
             </div>
           </div>

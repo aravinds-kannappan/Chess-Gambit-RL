@@ -14,6 +14,8 @@ export default function Home() {
   const [bw, setBw] = useState(440);
   const gameRef = useRef(new Chess());
   const [fen, setFen] = useState(gameRef.current.fen());
+  const stageRef = useRef<HTMLDivElement>(null);
+  const visibleRef = useRef(true);
 
   // live stats from the backend (best-effort)
   useEffect(() => {
@@ -37,11 +39,21 @@ export default function Home() {
     return () => window.removeEventListener("resize", f);
   }, []);
 
+  // pause the hero animation while it's scrolled out of view (keeps scroll smooth)
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const io = new IntersectionObserver(([e]) => { visibleRef.current = e.isIntersecting; }, { threshold: 0.08 });
+    io.observe(el);
+    return () => io.disconnect();
+  }, []);
+
   // a board that quietly plays itself (offline-safe ambience for the hero)
   useEffect(() => {
     let alive = true;
     const step = () => {
       if (!alive) return;
+      if (!visibleRef.current) { setTimeout(step, 700); return; } // idle when offscreen
       const g = gameRef.current;
       if (g.isGameOver() || g.history().length > 120) {
         setTimeout(() => {
@@ -94,7 +106,7 @@ export default function Home() {
           </div>
         </div>
 
-        <div className="board-stage">
+        <div className="board-stage" ref={stageRef}>
           <div className="ring" />
           <div className="board-wrap" style={{ width: bw + 18 }}>
             <Chessboard

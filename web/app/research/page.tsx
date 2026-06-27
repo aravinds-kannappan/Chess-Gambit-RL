@@ -102,13 +102,14 @@ export default function DashboardPage() {
 
       <div className="card">
         <div className="row" style={{ justifyContent: "space-between" }}>
-          <h2 style={{ margin: 0 }}>Strength over generations</h2>
+          <h2 style={{ margin: 0 }}>Strength over training</h2>
           {peak != null && <span className="chip">peak <b>{Math.round(peak)}</b> Elo</span>}
         </div>
         <p className="muted">
-          The orange line is each self-play generation (noisy on a free CPU); the blue
-          line is the gated champion - it only rises when a generation actually beats the
-          current one. Served play always uses that champion, scaled to your chosen Elo.
+          Each point is a checkpoint, rated by material-adjudicated games vs a random
+          baseline (orange = the per-checkpoint measurement, small-sample noise; blue =
+          best reached). The curve is anchored so the trained endpoint equals the live
+          Stockfish-calibrated rating.
         </p>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={curve}>
@@ -116,7 +117,7 @@ export default function DashboardPage() {
             <XAxis dataKey="gen" stroke="#93a1b5" />
             <YAxis stroke="#93a1b5" domain={["auto", "auto"]} />
             <Tooltip contentStyle={{ background: "#0b1018", border: "1px solid #2a313c", borderRadius: 10 }} />
-            <Line type="monotone" dataKey="elo" stroke="#f5a623" strokeWidth={1.5} dot={false} opacity={0.6} />
+            <Line type="monotone" dataKey="elo" stroke="#e8a33d" strokeWidth={1.5} dot={{ r: 2 }} opacity={0.7} />
             <Line type="monotone" dataKey="best" stroke="#6db0ff" strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
