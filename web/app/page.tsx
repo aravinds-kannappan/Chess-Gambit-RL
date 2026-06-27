@@ -1,93 +1,160 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Chess } from "chess.js";
+import { Chessboard } from "react-chessboard";
+import { eloMove } from "@/app/lib/engine";
 
-type Ladder = { generations?: number; best_elo?: number | null; calibrated_elo?: number | null; levels?: number[] };
-
-const TILES = [
-  { href: "/play", ic: "♟", h: "Play", p: "An opponent that meets your level and adapts to how you play.", c: "rgba(245,166,35,0.5)" },
-  { href: "/watch", ic: "♛", h: "Watch", p: "Pit two agents at the Elos you choose - or watch every tier at once.", c: "rgba(176,109,255,0.5)" },
-  { href: "/research", ic: "♚", h: "Dashboard", p: "The Elo ladder, Stockfish-calibrated ratings, and per-phase accuracy.", c: "rgba(109,176,255,0.5)" },
-];
+type Ladder = { generations?: number; best_elo?: number | null; calibrated_elo?: number | null };
 
 export default function Home() {
   const [ladder, setLadder] = useState<Ladder | null>(null);
   const [live, setLive] = useState(false);
+  const [bw, setBw] = useState(440);
+  const gameRef = useRef(new Chess());
+  const [fen, setFen] = useState(gameRef.current.fen());
 
+  // live stats from the backend (best-effort)
   useEffect(() => {
     let on = true;
-    const tick = async () => {
+    (async () => {
       try {
-        const res = await fetch("/api/ladder", { cache: "no-store" });
-        const data = await res.json();
-        if (on && res.ok && !data.error) { setLadder(data); setLive(true); }
+        const r = await fetch("/api/ladder", { cache: "no-store" });
+        const d = await r.json();
+        if (on && r.ok && !d.error) { setLadder(d); setLive(true); }
         else if (on) setLive(false);
       } catch { if (on) setLive(false); }
-    };
-    tick();
-    const id = setInterval(tick, 15000);
-    return () => { on = false; clearInterval(id); };
+    })();
+    return () => { on = false; };
   }, []);
 
-  const gens = ladder?.generations ?? 0;
+  // responsive board size
+  useEffect(() => {
+    const f = () => setBw(Math.max(260, Math.min(440, window.innerWidth - 80)));
+    f();
+    window.addEventListener("resize", f);
+    return () => window.removeEventListener("resize", f);
+  }, []);
+
+  // a board that quietly plays itself (offline-safe ambience for the hero)
+  useEffect(() => {
+    let alive = true;
+    const step = () => {
+      if (!alive) return;
+      const g = gameRef.current;
+      if (g.isGameOver() || g.history().length > 120) {
+        setTimeout(() => {
+          if (!alive) return;
+          gameRef.current = new Chess();
+          setFen(gameRef.current.fen());
+          setTimeout(step, 800);
+        }, 1600);
+        return;
+      }
+      const uci = eloMove(g.fen(), 1800);
+      if (uci) {
+        try {
+          g.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci.slice(4) || undefined });
+          setFen(g.fen());
+        } catch { /* skip a beat on a rare illegal */ }
+      }
+      setTimeout(step, 680);
+    };
+    const t = setTimeout(step, 500);
+    return () => { alive = false; clearTimeout(t); };
+  }, []);
+
   const rating = ladder?.calibrated_elo ?? ladder?.best_elo;
-  const best = rating ? Math.round(rating) : null;
-  const tiers = ladder?.levels?.length ?? 0;
+  const elo = rating ? Math.round(rating) : null;
+  const gens = ladder?.generations ?? null;
 
   return (
-    <main className="container">
-      <section className="hero">
-        <span className="eyebrow">A chess AI that adapts to you</span>
-        <h1 className="title">Play chess against<br /><span>an engine that learns</span></h1>
-        <p className="subtitle">
-          Pick your level and play. An opening book and a trained network handle the
-          opening and middlegame; exact endgame solvers finish the job - and Stockfish
-          grades the whole thing on a real Elo scale.
-        </p>
-        <div className="cta-row">
-          <Link href="/play" className="btn">Play now</Link>
-          <Link href="/watch" className="btn accent2">Watch a duel</Link>
+    <main>
+      <section className="wrap hero2">
+        <div>
+          <div className="kicker">{live ? "● serving live" : "chess · reinforcement learning"}</div>
+          <h1 className="display" style={{ marginTop: "1.3rem" }}>
+            A chess engine<br />that <em>learns</em>.
+          </h1>
+          <p className="lead" style={{ marginTop: "1.5rem" }}>
+            Pick your level and play. An opening book and a network trained on real
+            grandmaster games handle the opening and middlegame; exact solvers finish
+            the endgame — and Stockfish grades the whole thing on a real Elo scale.
+          </p>
+          <div style={{ display: "flex", gap: "0.8rem", marginTop: "2.1rem", flexWrap: "wrap" }}>
+            <Link href="/play" className="btn">Play the engine →</Link>
+            <Link href="/watch" className="btn ghost">Watch it play</Link>
+          </div>
+          <div className="statline" style={{ marginTop: "2.6rem" }}>
+            <span>elo <b>{elo ?? "—"}</b></span><span className="dot">·</span>
+            <span>stockfish&nbsp;calibrated</span><span className="dot">·</span>
+            <span>book <b>231</b></span><span className="dot">·</span>
+            <span>generations <b>{gens ?? "—"}</b></span>
+          </div>
+        </div>
+
+        <div className="board-stage">
+          <div className="ring" />
+          <div className="board-wrap" style={{ width: bw + 18 }}>
+            <Chessboard
+              position={fen}
+              arePiecesDraggable={false}
+              boardWidth={bw}
+              animationDuration={250}
+              customBoardStyle={{ borderRadius: "8px" }}
+              customDarkSquareStyle={{ backgroundColor: "#26241f" }}
+              customLightSquareStyle={{ backgroundColor: "#cbb78f" }}
+            />
+          </div>
         </div>
       </section>
 
-      <div className="grid cols-4">
-        <div className="card stat"><div className="num">{gens || "-"}</div><div className="label">Generations</div></div>
-        <div className="card stat"><div className="num">{best ?? "-"}</div><div className="label">{ladder?.calibrated_elo ? "Calibrated Elo" : "Best Elo"}</div></div>
-        <div className="card stat"><div className="num">{tiers || "-"}</div><div className="label">Elo tiers</div></div>
-        <div className="card stat"><div className="num"><span className={`badge ${live ? "live" : ""}`}>{live ? "live" : "warming"}</span></div><div className="label">Backend</div></div>
-      </div>
+      <section className="band">
+        <div className="band-inner">
+          <div className="kicker">how it works</div>
+          <div className="how">
+            <div>
+              <span className="hn">01</span>
+              <h3>Opening book</h3>
+              <p>The first moves come from a book learned from thousands of 2000+ rated games — sound, varied, and principled instead of offbeat.</p>
+            </div>
+            <div>
+              <span className="hn">02</span>
+              <h3>Trained network</h3>
+              <p>A residual net pre-trained by behavioural cloning on real games, then refined by gated self-play that keeps a generation only if it actually wins.</p>
+            </div>
+            <div>
+              <span className="hn">03</span>
+              <h3>Exact endgames</h3>
+              <p>Solved-endgame tablebases — Bellman dynamic programming — convert won positions perfectly once the board simplifies.</p>
+            </div>
+          </div>
+        </div>
+      </section>
 
-      <div className="deck" style={{ gridTemplateColumns: "repeat(3, 1fr)", marginTop: "2rem" }}>
-        {TILES.map((t) => (
-          <Link key={t.href} href={t.href} className="tile">
-            <span className="glowdot" style={{ background: t.c }} />
-            <span className="ic">{t.ic}</span>
-            <h3>{t.h}</h3>
-            <p>{t.p}</p>
-          </Link>
-        ))}
-      </div>
+      <section className="band">
+        <div className="band-inner ref">
+          <div>
+            <div className="kicker">the referee</div>
+            <h2 className="display" style={{ fontSize: "clamp(2rem, 4.5vw, 3.2rem)", marginTop: "1rem" }}>
+              Stockfish grades it.<br />It never plays for it.
+            </h2>
+          </div>
+          <p className="lead">
+            Every move comes from the trained agents — never from Stockfish. A separate
+            evaluator throttles Stockfish to known Elo bands and plays gauntlets, turning
+            the scores into one honest, calibrated rating: the number you see.
+          </p>
+        </div>
+      </section>
 
-      <div className="card" style={{ marginTop: "2rem" }}>
-        <h2>How it works</h2>
-        <ul className="muted" style={{ margin: 0 }}>
-          <li>A <b>phase router</b> hands each position to the right method: an
-            <b> opening book</b> for the first moves, a <b>trained network</b> for the
-            middlegame, and <b>exact Bellman solvers</b> in the endgame.</li>
-          <li>The network is pre-trained on real Lichess games, then refined by
-            self-play with <b>champion gating</b> - a new generation is only served if
-            it actually beats the current one, so strength never regresses.</li>
-          <li><b>Stockfish is only the referee</b>: the agents never use it to choose a
-            move; it grades them (centipawn loss, per-phase accuracy, calibrated Elo).</li>
-        </ul>
-      </div>
-
-      <p className="muted" style={{ marginTop: "1.4rem", fontSize: "0.9rem" }}>
-        More: <Link href="/predict">Predict a position</Link> ·{" "}
-        <Link href="/tiers">Live agent tiers</Link> ·{" "}
-        <Link href="/arena">Challenge ladder</Link>
-      </p>
+      <section className="band">
+        <div className="band-inner cta2">
+          <h2 className="display" style={{ fontSize: "clamp(2.4rem, 6vw, 4.4rem)" }}>Your move.</h2>
+          <Link href="/play" className="btn">Play now →</Link>
+        </div>
+      </section>
     </main>
   );
 }
