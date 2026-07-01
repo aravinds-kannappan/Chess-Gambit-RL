@@ -41,6 +41,10 @@ ENDGAME_MDPS = tuple(n for n in os.environ.get("ENDGAME_MDP", "").split(",") if 
 server = ModelServer(MODELS_DIR, endgame_mdps=ENDGAME_MDPS)
 _train_state = {"running": False, "last_gen": None, "last_elo": None}
 _calib_state = {"running": False, "result": None}
+# Adaptation state: cached personal agents (loading a 40MB checkpoint per move
+# is what made adapted play crawl) and an in-flight guard per session.
+_personal_agents: dict[str, object] = {}
+_adapt_state: dict[str, dict] = {}
 
 
 def _background_trainer() -> None:
@@ -106,7 +110,15 @@ def _warmup() -> None:
 
         base = pull_base_model(HF_MODEL_REPO, MODELS_DIR)
         if base:
-            server.set_base(base, elo=float(os.environ.get("BASE_ELO", "1600")))
+            # The reference Elo must be the net's MEASURED strength, or every
+            # scaled level is wrong (a 1600 reference on a ~980 net meant
+            # "900" was served with 50% random blunders). Prefer the champion's
+            # Stockfish-calibrated rating; BASE_ELO env only overrides explicitly.
+            champ = server.ladder.champion()
+            measured = champ.metrics.get("calibrated_elo") if champ else None
+            elo = float(os.environ.get("BASE_ELO") or measured or (champ.elo if champ else 1000))
+            server.set_base(base, elo=elo)
+            print(f"serving base at reference elo {elo}", flush=True)
     except Exception as exc:  # noqa: BLE001
         print("base model load skipped:", exc, flush=True)
     server.ensure_seeded()
@@ -162,7 +174,9 @@ def healthz() -> dict:
     info = server.ladder_info()
     return {"status": "ok", "generations": info["generations"],
             "best_elo": info["best_elo"], "calibrated_elo": info["calibrated_elo"],
-            "training": _train_state, "calibration": _calib_state}
+            "ceiling": info["ceiling"],
+            "training": _train_state, "calibration": _calib_state,
+            "adapting_sessions": sum(1 for s in _adapt_state.values() if s.get("running"))}
 
 
 @app.get("/ladder")
@@ -193,17 +207,45 @@ def calibrate() -> dict:
     return {"status": "started"}
 
 
-@app.post("/move")
-def move(req: MoveReq) -> dict:
-    personal = Path(MODELS_DIR) / "personal" / f"{req.session}.pt" if req.session else None
-    if personal and personal.exists():
-        import chess
+def _personal_agent(session: str):
+    """Cached personal agent for a session: local file first, then the Hub.
 
+    Returns ``None`` when the session has no adapted checkpoint anywhere. The
+    Hub lookup is what makes adaptation survive Space restarts (free-tier disks
+    are ephemeral, so a local-only personal net used to vanish every restart).
+    """
+    if session in _personal_agents:
+        return _personal_agents[session]
+    path = Path(MODELS_DIR) / "personal" / f"{session}.pt"
+    if not path.exists() and HF_MODEL_REPO:
+        try:
+            from shannons_gambit.export import pull_personal
+
+            pull_personal(HF_MODEL_REPO, session, MODELS_DIR)
+        except Exception:  # noqa: BLE001 - fall through to the shared net
+            pass
+    agent = None
+    if path.exists():
         from shannons_gambit.agents.alphazero.mcts import AlphaZeroAgent
 
-        agent = AlphaZeroAgent.from_checkpoint(str(personal), simulations=server.base_sims)
-        mv = agent.select_move(chess.Board(req.fen))
-        return {"move": mv.uci(), "source": "personal", "gen": -1, "elo": None}
+        agent = AlphaZeroAgent.from_checkpoint(str(path), simulations=server.base_sims,
+                                               temperature=0.3)
+    _personal_agents[session] = agent
+    return agent
+
+
+@app.post("/move")
+def move(req: MoveReq) -> dict:
+    if req.session:
+        agent = _personal_agent(req.session)
+        if agent is not None:
+            import chess
+
+            mv = agent.select_move(chess.Board(req.fen))
+            ceiling = server.ceiling()
+            return {"move": mv.uci(), "source": "personal", "gen": -1,
+                    "elo": round(ceiling, 0), "ceiling": round(ceiling, 0),
+                    "route": "personal", "adapted": True}
     return server.move(req.fen, elo=req.elo)
 
 
@@ -225,7 +267,11 @@ def log_game(req: LogReq) -> dict:
     sess_dir.mkdir(parents=True, exist_ok=True)
     with (sess_dir / f"{req.session_id}.jsonl").open("a", encoding="utf-8") as fh:
         fh.write(json.dumps({"fens": req.fens, "moves": req.moves, "result": req.result}) + "\n")
-    return {"status": "logged", "session": req.session_id}
+    # Adaptation should not require a button: fine-tune the personal net in the
+    # background after every finished game (guarded so one session adapts once
+    # at a time). The next /move for this session serves the adapted net.
+    started = _start_adapt(req.session_id)
+    return {"status": "logged", "session": req.session_id, "adapting": started}
 
 
 def _base_checkpoint() -> str | None:
@@ -240,23 +286,62 @@ def _base_checkpoint() -> str | None:
     return resolved if Path(resolved).exists() else None
 
 
-@app.post("/adapt")
-def adapt(req: AdaptReq) -> dict:
+def _do_adapt(session_id: str) -> dict:
+    """Fine-tune the session's personal checkpoint on its logged games."""
     import json
 
     from shannons_gambit.agents.adaptive import adapt_to_games
 
-    path = Path(MODELS_DIR) / "sessions" / f"{req.session_id}.jsonl"
+    path = Path(MODELS_DIR) / "sessions" / f"{session_id}.jsonl"
     if not path.exists():
         return {"error": "no logged games for this session yet - play a full game first"}
     base = _base_checkpoint()
     if base is None:
         return {"error": "no base checkpoint available to fine-tune from"}
+    games = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+    out = Path(MODELS_DIR) / "personal" / f"{session_id}.pt"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    result = adapt_to_games(base, games, str(out))
+    _personal_agents.pop(session_id, None)  # next /move loads the new weights
+    if HF_MODEL_REPO and os.environ.get("HF_TOKEN"):
+        try:  # persist across restarts (free-tier disk is ephemeral)
+            from shannons_gambit.export import push_personal
+
+            push_personal(HF_MODEL_REPO, session_id, str(out))
+            result["persisted"] = True
+        except Exception as exc:  # noqa: BLE001 - adaptation still works locally
+            print("personal push skipped:", exc, flush=True)
+    return {"adapted": True, "n_games": len(games), **result}
+
+
+def _start_adapt(session_id: str) -> bool:
+    """Kick off a background adapt for a session (no-op if one is running)."""
+    state = _adapt_state.get(session_id)
+    if state and state.get("running"):
+        return False
+
+    def worker() -> None:
+        _adapt_state[session_id] = {"running": True, "result": None}
+        try:
+            _adapt_state[session_id]["result"] = _do_adapt(session_id)
+        except Exception as exc:  # noqa: BLE001
+            _adapt_state[session_id]["result"] = {"error": f"adapt failed: {exc}"}
+        finally:
+            _adapt_state[session_id]["running"] = False
+
+    threading.Thread(target=worker, daemon=True).start()
+    return True
+
+
+@app.post("/adapt")
+def adapt(req: AdaptReq) -> dict:
+    """Manual adapt trigger; also reports a background adapt's latest result."""
+    state = _adapt_state.get(req.session_id)
+    if state and state.get("running"):
+        return {"status": "adapting"}
+    if state and state.get("result") is not None:
+        return state["result"]
     try:
-        games = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
-        out = Path(MODELS_DIR) / "personal" / f"{req.session_id}.pt"
-        out.parent.mkdir(parents=True, exist_ok=True)
-        result = adapt_to_games(base, games, str(out))
-        return {"adapted": True, "n_games": len(games), **result}
+        return _do_adapt(req.session_id)
     except Exception as exc:  # noqa: BLE001 - report instead of a bare 500
         return {"error": f"adapt failed: {exc}"}

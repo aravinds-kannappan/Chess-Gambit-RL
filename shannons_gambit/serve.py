@@ -105,6 +105,20 @@ class ModelServer:
         return self._predictors[gen]
 
     # --- strength selection ------------------------------------------------
+    def ceiling(self) -> float:
+        """The engine's honest maximum strength: the reference Elo it serves from.
+
+        The base net's measured (Stockfish-calibrated when available) rating.
+        Requests above this are served at full strength and *reported* at the
+        ceiling instead of echoing an Elo the engine cannot actually play at.
+        """
+        if self._base_model is not None:
+            return float(self._base_elo)
+        entry = self.ladder.champion() or self.ladder.latest()
+        if entry is None:
+            return 600.0
+        return float(entry.metrics.get("calibrated_elo") or entry.elo)
+
     def agent_for_elo(self, target_elo: float, *, seed: int = 0
                       ) -> tuple[AlphaZeroAgent, LadderEntry]:
         # Serve from the strongest net available (pre-trained base if set, else
@@ -182,15 +196,20 @@ class ModelServer:
         if seed is None:
             seed = random.randrange(1, 2**31)
         board = chess.Board(fen)
-        champ = self.ladder.champion()
-        target = elo if elo is not None else (champ.elo if champ else 1000)
+        ceiling = self.ceiling()
+        target = elo if elo is not None else ceiling
         router, entry = self.router_for_elo(target, seed=seed)
         mv = router.select_move(board)
+        # Honesty rule: never echo an Elo above what the engine can actually
+        # play. Above the ceiling it serves full strength and says so.
+        served = min(float(target), ceiling)
         return {
             "move": mv.uci(),
             "gen": entry.gen if entry else -1,
-            # Report the Elo the agent was actually scaled to play at.
-            "elo": round(float(target), 0),
+            "elo": round(served, 0),
+            "requested_elo": round(float(target), 0),
+            "ceiling": round(ceiling, 0),
+            "at_ceiling": float(target) >= ceiling,
             "calibrated_elo": entry.metrics.get("calibrated_elo") if entry else None,
             "route": router.last_route,
             "source": "model",
@@ -214,6 +233,8 @@ class ModelServer:
             "best_elo": champ.elo if champ else None,
             "champion_gen": champ.gen if champ else None,
             "calibrated_elo": champ.metrics.get("calibrated_elo") if champ else None,
+            # Honest playable range for UIs: sliders should cap here.
+            "ceiling": round(self.ceiling(), 0),
             "levels": self.ladder.levels(),
             "elo_curve": self.ladder.elo_curve(),
         }

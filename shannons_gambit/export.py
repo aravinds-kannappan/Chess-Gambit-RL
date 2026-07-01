@@ -84,6 +84,36 @@ def pull_ladder_from_hub(repo_id: str, run_dir: str, *, max_checkpoints: int = 8
     return True
 
 
+def push_personal(repo_id: str, session_id: str, ckpt_path: str) -> str:
+    """Persist a per-session personal checkpoint to the Hub.
+
+    Free Spaces have ephemeral disks, so an adapted personal net vanishes on
+    every restart unless it lives in the model repo (under ``personal/``).
+    """
+    from huggingface_hub import HfApi
+
+    HfApi().upload_file(path_or_fileobj=ckpt_path,
+                        path_in_repo=f"personal/{session_id}.pt", repo_id=repo_id)
+    return f"https://huggingface.co/{repo_id}"
+
+
+def pull_personal(repo_id: str, session_id: str, run_dir: str) -> str | None:
+    """Fetch a session's personal checkpoint from the Hub (None if absent)."""
+    from huggingface_hub import hf_hub_download
+
+    target = Path(run_dir) / "personal" / f"{session_id}.pt"
+    if target.exists():
+        return str(target)
+    try:
+        fp = Path(hf_hub_download(repo_id, f"personal/{session_id}.pt", local_dir=run_dir))
+    except Exception:
+        return None
+    if fp != target:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(fp), str(target))
+    return str(target)
+
+
 def push_opening_book(repo_id: str, book_path: str) -> str:
     """Upload the learned opening book to the model repo (served by the Space)."""
     from huggingface_hub import HfApi, create_repo
