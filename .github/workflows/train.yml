@@ -1,0 +1,65 @@
+# Nightly continual training on the free GitHub Actions runner.
+#
+# Every night: pull the champion from the Hub, run gated self-play generations
+# with human-data (SFT) replay, re-grade vs Stockfish, push the ladder back,
+# and restart the serving Space. Gating means a bad night can never weaken the
+# served engine; a good night promotes a stronger champion.
+#
+# Requires the HF_TOKEN repo secret (write access to the model repo + Space).
+
+name: nightly-training
+
+on:
+  schedule:
+    - cron: "17 6 * * *" # 06:17 UTC nightly
+  workflow_dispatch:
+    inputs:
+      gens:
+        description: "self-play generations"
+        default: "6"
+      games_per_gen:
+        description: "games per generation"
+        default: "16"
+      simulations:
+        description: "MCTS simulations per move"
+        default: "48"
+
+concurrency:
+  group: nightly-training
+  cancel-in-progress: false
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Stockfish (rating referee)
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq stockfish
+
+      - name: Install package (CPU torch)
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install -e ".[ml]"
+
+      - name: Restore dataset cache
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: lichess-2000plus-30k-v1
+
+      - name: Train (gated self-play + SFT replay)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          STOCKFISH_PATH: /usr/games/stockfish
+        run: |
+          python -m shannons_gambit.nightly_job \
+            --gens "${{ github.event.inputs.gens || '6' }}" \
+            --games-per-gen "${{ github.event.inputs.games_per_gen || '16' }}" \
+            --simulations "${{ github.event.inputs.simulations || '48' }}"
