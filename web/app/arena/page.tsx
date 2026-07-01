@@ -3,20 +3,29 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 
-interface Ladder { generations?: number; best_elo?: number; calibrated_elo?: number }
+interface Ladder { generations?: number; best_elo?: number; calibrated_elo?: number; ceiling?: number }
 
-// Playable strength tiers (not a list of training runs). Serving scales the base
-// net to any of these Elos, so each is a level you can actually challenge.
-const TIERS = [
-  { name: "Elite", elo: 2300, ic: "♚", style: "Tournament prep. Punishes every loose move.", color: "#ff8fd0" },
-  { name: "Master", elo: 2000, ic: "♛", style: "Sharp tactics and clean conversion.", color: "#f85149" },
-  { name: "Expert", elo: 1700, ic: "♜", style: "Solid plans, rarely blunders.", color: "#b06dff" },
-  { name: "Club", elo: 1400, ic: "♝", style: "Knows the ideas, makes the odd slip.", color: "#f5a623" },
-  { name: "Casual", elo: 1100, ic: "♞", style: "Plays naturally, forgives mistakes.", color: "#3fb950" },
-  { name: "Novice", elo: 800, ic: "♟", style: "Gentle. A friendly first opponent.", color: "#6db0ff" },
-];
+// Challenge rungs derived from the engine's HONEST ceiling. Every rung is a
+// level the engine can actually play; nothing on this ladder is aspirational.
+function buildRungs(ceiling: number) {
+  const names: [string, string, string][] = [
+    ["Pawn", "♟", "Gentle. A friendly first opponent."],
+    ["Knight", "♞", "Plays naturally, forgives mistakes."],
+    ["Bishop", "♝", "Knows the ideas, makes the odd slip."],
+    ["Rook", "♜", "Solid plans, fewer blunders."],
+    ["Queen", "♛", "Sharp for its size. Converts material."],
+    ["King", "♚", "Full strength. The whole book and search budget."],
+  ];
+  const colors = ["#8b7f6d", "#3f6d4e", "#97741f", "#7a5836", "#8a3324", "#5f4226"];
+  const lo = 500;
+  return names.map(([name, ic, style], i) => ({
+    name, ic, style,
+    elo: Math.round((lo + ((Math.max(ceiling, 650) - lo) * i) / (names.length - 1)) / 25) * 25,
+    color: colors[i],
+  }));
+}
 
-export default function TiersLadderPage() {
+export default function ChallengeLadderPage() {
   const [data, setData] = useState<Ladder | null>(null);
   const [live, setLive] = useState(false);
 
@@ -34,40 +43,40 @@ export default function TiersLadderPage() {
     return () => clearInterval(t);
   }, []);
 
-  const reach = Math.round(data?.calibrated_elo ?? data?.best_elo ?? 0);
+  const ceiling = Math.round(data?.ceiling ?? data?.calibrated_elo ?? data?.best_elo ?? 1000);
+  const rungs = buildRungs(ceiling);
 
   return (
     <main className="container">
-      <h1 className="title" style={{ fontSize: "2.1rem" }}>Challenge <span>tiers</span></h1>
+      <h1 className="title" style={{ fontSize: "2.1rem" }}>The <span>challenge ladder</span></h1>
       <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 1.4rem" }}>
-        Pick a level and play. The agent is the strong pre-trained net scaled to that
-        Elo - not a list of training runs. {live && reach ? `Right now it benchmarks around ${reach} Elo.` : ""}
+        Pick a rung and play. Every level is real: the ladder tops out at the engine&apos;s
+        measured ceiling (~{ceiling}, Stockfish graded){live ? ", live from the backend" : ""}.
+        Nightly training pushes the top rung higher.
       </p>
 
       <div className="rungs">
-        {TIERS.map((t) => {
-          const reachable = reach > 0 && reach >= t.elo;
-          return (
-            <div key={t.name} className={`rung ${reachable ? "best" : ""}`}>
-              <span className="fill" style={{ width: `${Math.min(100, (t.elo / 2300) * 100)}%`, background: `linear-gradient(90deg, ${t.color}22, transparent)` }} />
-              <span style={{ fontSize: "1.7rem" }}>{t.ic}</span>
-              <span>
-                <span style={{ fontWeight: 700, color: t.color, fontSize: "1.05rem" }}>{t.name}</span>
-                <span className="elo" style={{ marginLeft: "0.6rem" }}>{t.elo}</span>
-                <div className="muted" style={{ fontSize: "0.85rem" }}>{t.style}</div>
-              </span>
-              <Link href="/play" className="btn secondary" style={{ marginLeft: "auto" }}>Challenge</Link>
-            </div>
-          );
-        })}
+        {rungs.map((t) => (
+          <div key={t.name} className={`rung ${t.elo >= ceiling ? "best" : ""}`}>
+            <span className="fill" style={{ width: `${Math.min(100, (t.elo / Math.max(ceiling, 1)) * 100)}%`, background: `linear-gradient(90deg, ${t.color}22, transparent)` }} />
+            <span style={{ fontSize: "1.7rem" }}>{t.ic}</span>
+            <span>
+              <span style={{ fontWeight: 700, color: t.color, fontSize: "1.05rem" }}>{t.name}</span>
+              <span className="elo" style={{ marginLeft: "0.6rem" }}>{t.elo}</span>
+              <div className="muted" style={{ fontSize: "0.85rem" }}>{t.style}</div>
+            </span>
+            <Link href="/play" className="btn secondary" style={{ marginLeft: "auto" }}>Challenge</Link>
+          </div>
+        ))}
       </div>
 
       <div className="card" style={{ marginTop: "1.4rem" }}>
-        <h2>How a tier is built</h2>
+        <h2>How a rung is built</h2>
         <p className="muted" style={{ margin: 0 }}>
-          One strong network (pre-trained on real games, refined by self-play) is throttled
-          to each tier with search depth and a calibrated blunder rate, then graded by
-          Stockfish so the Elo on the label is real - not a self-reported number.
+          One trained network (cloned from real games, refined by gated nightly
+          self-play) is throttled to each rung with search depth and a calibrated
+          blunder rate. Stockfish grades the top rung, so the number on the label is
+          measured, not self-reported.
         </p>
       </div>
     </main>

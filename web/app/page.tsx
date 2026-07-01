@@ -6,12 +6,19 @@ import { Chess } from "chess.js";
 import { Chessboard } from "react-chessboard";
 import { eloMove } from "@/app/lib/engine";
 
-type Ladder = { generations?: number; best_elo?: number | null; calibrated_elo?: number | null };
+type GenRow = { gen: number; elo: number; promoted?: boolean; created?: string };
+type Ladder = {
+  generations?: number;
+  best_elo?: number | null;
+  calibrated_elo?: number | null;
+  ceiling?: number | null;
+  elo_curve?: GenRow[];
+};
 
 export default function Home() {
   const [ladder, setLadder] = useState<Ladder | null>(null);
   const [live, setLive] = useState(false);
-  const [bw, setBw] = useState(440);
+  const [bw, setBw] = useState(420);
   const gameRef = useRef(new Chess());
   const [fen, setFen] = useState(gameRef.current.fen());
   const stageRef = useRef<HTMLDivElement>(null);
@@ -33,13 +40,13 @@ export default function Home() {
 
   // responsive board size
   useEffect(() => {
-    const f = () => setBw(Math.max(260, Math.min(440, window.innerWidth - 80)));
+    const f = () => setBw(Math.max(260, Math.min(420, window.innerWidth - 110)));
     f();
     window.addEventListener("resize", f);
     return () => window.removeEventListener("resize", f);
   }, []);
 
-  // pause the hero animation while it's scrolled out of view (keeps scroll smooth)
+  // pause the demo game while it is scrolled out of view (keeps scroll smooth)
   useEffect(() => {
     const el = stageRef.current;
     if (!el || typeof IntersectionObserver === "undefined") return;
@@ -53,7 +60,7 @@ export default function Home() {
     let alive = true;
     const step = () => {
       if (!alive) return;
-      if (!visibleRef.current) { setTimeout(step, 700); return; } // idle when offscreen
+      if (!visibleRef.current) { setTimeout(step, 700); return; }
       const g = gameRef.current;
       if (g.isGameOver() || g.history().length > 120) {
         setTimeout(() => {
@@ -71,7 +78,7 @@ export default function Home() {
           setFen(g.fen());
         } catch { /* skip a beat on a rare illegal */ }
       }
-      setTimeout(step, 680);
+      setTimeout(step, 700);
     };
     const t = setTimeout(step, 500);
     return () => { alive = false; clearTimeout(t); };
@@ -80,66 +87,76 @@ export default function Home() {
   const rating = ladder?.calibrated_elo ?? ladder?.best_elo;
   const elo = rating ? Math.round(rating) : null;
   const gens = ladder?.generations ?? null;
+  // scorebook rows: the most recent ladder entries, newest first
+  const rows = (ladder?.elo_curve ?? []).slice(-6).reverse();
+  const bestElo = ladder?.best_elo ?? -Infinity;
 
   return (
     <main>
       <section className="wrap hero2">
         <div>
-          <div className="kicker">{live ? "● serving live" : "chess · reinforcement learning"}</div>
-          <h1 className="display" style={{ marginTop: "1.3rem" }}>
+          <div className="kicker">{live ? "the engine is at the table" : "a chess club with a learning engine"}</div>
+          <h1 className="display" style={{ marginTop: "1.2rem" }}>
             A chess engine<br />that <em>learns</em>.
           </h1>
-          <p className="lead" style={{ marginTop: "1.5rem" }}>
-            Pick your level and play. An opening book and a network trained on real
-            grandmaster games handle the opening and middlegame; exact solvers finish
-            the endgame — and Stockfish grades the whole thing on a real Elo scale.
+          <p className="lead" style={{ marginTop: "1.4rem" }}>
+            Take a seat. The house engine opens from a book of master games, plays the
+            middlegame with a network trained on real chess, and converts endgames with
+            exact solvers. Every night it trains; Stockfish grades it, so the rating on
+            the plate is honest.
           </p>
-          <div style={{ display: "flex", gap: "0.8rem", marginTop: "2.1rem", flexWrap: "wrap" }}>
-            <Link href="/play" className="btn">Play the engine →</Link>
-            <Link href="/watch" className="btn ghost">Watch it play</Link>
+          <div style={{ display: "flex", gap: "0.8rem", marginTop: "2rem", flexWrap: "wrap" }}>
+            <Link href="/play" className="btn">Challenge the engine</Link>
+            <Link href="/watch" className="btn ghost">Watch a game</Link>
           </div>
-          <div className="statline" style={{ marginTop: "2.6rem" }}>
-            <span>elo <b>{elo ?? "—"}</b></span><span className="dot">·</span>
-            <span>stockfish&nbsp;calibrated</span><span className="dot">·</span>
-            <span>book <b>231</b></span><span className="dot">·</span>
-            <span>generations <b>{gens ?? "—"}</b></span>
+          <div className="statline" style={{ marginTop: "2.4rem" }}>
+            <span>rated <b>{elo ?? "..."}</b></span>
+            <span className="dot">·</span>
+            <span>stockfish graded</span>
+            <span className="dot">·</span>
+            <span>generation <b>{gens ?? "..."}</b></span>
+            <span className="dot">·</span>
+            <span>trains nightly</span>
           </div>
         </div>
 
         <div className="board-stage" ref={stageRef}>
-          <div className="ring" />
-          <div className="board-wrap" style={{ width: bw + 18 }}>
+          <div className="board-wrap" style={{ width: bw + 26 }}>
             <Chessboard
               position={fen}
               arePiecesDraggable={false}
               boardWidth={bw}
               animationDuration={250}
-              customBoardStyle={{ borderRadius: "8px" }}
-              customDarkSquareStyle={{ backgroundColor: "#26241f" }}
-              customLightSquareStyle={{ backgroundColor: "#cbb78f" }}
+              customBoardStyle={{ borderRadius: "3px" }}
+              customDarkSquareStyle={{ backgroundColor: "#9a6b44" }}
+              customLightSquareStyle={{ backgroundColor: "#e8d2a8" }}
             />
           </div>
+          <div className="plate">house engine · playing itself</div>
         </div>
       </section>
 
-      <section className="band">
+      <section className="band tint">
         <div className="band-inner">
-          <div className="kicker">how it works</div>
+          <div className="kicker">how it plays</div>
           <div className="how">
             <div>
-              <span className="hn">01</span>
-              <h3>Opening book</h3>
-              <p>The first moves come from a book learned from thousands of 2000+ rated games — sound, varied, and principled instead of offbeat.</p>
+              <span className="hn">I. OPENING</span>
+              <span className="pc">♗</span>
+              <h3>From the book</h3>
+              <p>The first moves come from an opening book learned from thousands of 2000+ rated games. Sound, varied, principled.</p>
             </div>
             <div>
-              <span className="hn">02</span>
-              <h3>Trained network</h3>
-              <p>A residual net pre-trained by behavioural cloning on real games, then refined by gated self-play that keeps a generation only if it actually wins.</p>
+              <span className="hn">II. MIDDLEGAME</span>
+              <span className="pc">♘</span>
+              <h3>From the network</h3>
+              <p>A residual net cloned from real games, then refined by nightly self-play. A new generation is kept only if it beats the champion.</p>
             </div>
             <div>
-              <span className="hn">03</span>
-              <h3>Exact endgames</h3>
-              <p>Solved-endgame tablebases — Bellman dynamic programming — convert won positions perfectly once the board simplifies.</p>
+              <span className="hn">III. ENDGAME</span>
+              <span className="pc">♖</span>
+              <h3>From the tables</h3>
+              <p>Solved endgames are played perfectly with exact dynamic programming. Won positions get converted, not fumbled.</p>
             </div>
           </div>
         </div>
@@ -148,23 +165,58 @@ export default function Home() {
       <section className="band">
         <div className="band-inner ref">
           <div>
-            <div className="kicker">the referee</div>
-            <h2 className="display" style={{ fontSize: "clamp(2rem, 4.5vw, 3.2rem)", marginTop: "1rem" }}>
+            <div className="kicker">the arbiter</div>
+            <h2 className="display" style={{ fontSize: "clamp(1.9rem, 4.2vw, 3rem)", marginTop: "0.9rem" }}>
               Stockfish grades it.<br />It never plays for it.
             </h2>
           </div>
           <p className="lead">
-            Every move comes from the trained agents — never from Stockfish. A separate
-            evaluator throttles Stockfish to known Elo bands and plays gauntlets, turning
-            the scores into one honest, calibrated rating: the number you see.
+            Every move belongs to the trained agents. Stockfish sits outside the game as
+            the arbiter: throttled to known ratings, it plays grading matches and signs
+            off the calibrated Elo you see. No self-reported numbers.
           </p>
+        </div>
+      </section>
+
+      <section className="band tint">
+        <div className="band-inner">
+          <div className="row" style={{ justifyContent: "space-between", alignItems: "baseline" }}>
+            <div className="kicker">the scorebook</div>
+            <Link href="/research" className="mono" style={{ fontSize: "0.8rem", color: "var(--accent)" }}>
+              full scorebook ↗
+            </Link>
+          </div>
+          <p className="lead" style={{ margin: "0.9rem 0 1.3rem" }}>
+            Every training generation is an entry: its rating, and whether it earned the
+            table. A generation is promoted only if it beats the sitting champion.
+          </p>
+          {rows.length > 0 ? (
+            <table className="score">
+              <thead>
+                <tr><th>Gen</th><th>Rating</th><th>Verdict</th></tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.gen} className={r.elo >= bestElo ? "champ" : ""}>
+                    <td>№ {r.gen}</td>
+                    <td>{Math.round(r.elo)}</td>
+                    <td>{r.elo >= bestElo ? "champion" : r.promoted ? "promoted" : "held off"}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="pill">The scorebook opens when the backend wakes.</p>
+          )}
         </div>
       </section>
 
       <section className="band">
         <div className="band-inner cta2">
-          <h2 className="display" style={{ fontSize: "clamp(2.4rem, 6vw, 4.4rem)" }}>Your move.</h2>
-          <Link href="/play" className="btn">Play now →</Link>
+          <h2 className="display" style={{ fontSize: "clamp(2.2rem, 5.5vw, 4rem)" }}>
+            <em>Your move.</em>
+          </h2>
+          <Link href="/play" className="btn">Take a seat</Link>
         </div>
       </section>
     </main>

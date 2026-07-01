@@ -47,13 +47,13 @@ export default function PredictPage() {
   const span = recs.length ? Math.max(0.6, recs[0].score - lo) : 1;
   const whiteHeight = Math.round(((Math.max(-6, Math.min(6, evalP)) + 6) / 12) * 100);
 
-  // board arrows: amber = trained-net best move, blue = hovered/top engine rec
+  // board arrows: claret = trained-net best move, green = hovered/top engine rec
   const arrows: [string, string, string?][] = [];
   if (pred?.bestMove && pred.bestMove.length >= 4)
-    arrows.push([pred.bestMove.slice(0, 2), pred.bestMove.slice(2, 4), "#e8a33d"]);
+    arrows.push([pred.bestMove.slice(0, 2), pred.bestMove.slice(2, 4), "#8a3324"]);
   const previewUci = hover ?? recs[0]?.uci;
   if (previewUci && previewUci.length >= 4 && previewUci !== pred?.bestMove)
-    arrows.push([previewUci.slice(0, 2), previewUci.slice(2, 4), "#6db0ff"]);
+    arrows.push([previewUci.slice(0, 2), previewUci.slice(2, 4), "#3f6d4e"]);
 
   return (
     <main className="container">
@@ -79,9 +79,9 @@ export default function PredictPage() {
             <div style={{ flex: 1 }}>
               <Chessboard position={fen} arePiecesDraggable={false} boardWidth={460}
                 customArrows={arrows as never}
-                customBoardStyle={{ borderRadius: "10px" }}
-                customDarkSquareStyle={{ backgroundColor: "#26241f" }}
-                customLightSquareStyle={{ backgroundColor: "#cbb78f" }} />
+                customBoardStyle={{ borderRadius: "3px" }}
+                customDarkSquareStyle={{ backgroundColor: "#9a6b44" }}
+                customLightSquareStyle={{ backgroundColor: "#e8d2a8" }} />
             </div>
           </div>
           {mode === "custom" ? (
@@ -99,7 +99,7 @@ export default function PredictPage() {
           <div className="card">
             <div className="row" style={{ justifyContent: "space-between" }}>
               <b>{turn} to move</b>
-              <span className="eval-num" style={{ color: evalP >= 0 ? "#eaf1f8" : "#f5a623", fontSize: "1.1rem" }}>
+              <span className="eval-num" style={{ color: evalP >= 0 ? "var(--ink)" : "var(--accent)", fontSize: "1.1rem" }}>
                 {evalP >= 0 ? "+" : ""}{evalP.toFixed(1)}
               </span>
             </div>
@@ -115,7 +115,7 @@ export default function PredictPage() {
               ))}
               {recs.length > 0 && (
                 <p className="pill" style={{ marginTop: "0.5rem" }}>
-                  hover a move to preview it · <span style={{ color: "#e8a33d" }}>amber</span> = network&apos;s pick
+                  hover a move to preview it · <span style={{ color: "#8a3324" }}>claret</span> = network&apos;s pick
                 </p>
               )}
             </div>

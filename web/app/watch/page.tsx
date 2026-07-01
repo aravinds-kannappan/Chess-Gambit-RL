@@ -9,11 +9,26 @@ export default function WatchPage() {
   const gameRef = useRef(new Chess());
   const playingRef = useRef(false);
   const [fen, setFen] = useState(gameRef.current.fen());
-  const [whiteElo, setWhiteElo] = useState(1600);
-  const [blackElo, setBlackElo] = useState(1000);
+  const [whiteElo, setWhiteElo] = useState(950);
+  const [blackElo, setBlackElo] = useState(650);
+  const [ceiling, setCeiling] = useState(1000);
   const [playing, setPlaying] = useState(false);
-  const [status, setStatus] = useState("Set each side's Elo and press Play.");
+  const [status, setStatus] = useState("Set each side's rating and press Play.");
   const [src, setSrc] = useState("");
+
+  // honest slider range: the backend's calibrated ceiling
+  useEffect(() => {
+    let on = true;
+    fetch("/api/ladder").then((r) => r.json()).then((d) => {
+      const c = Math.round(d?.ceiling ?? d?.calibrated_elo ?? d?.best_elo ?? 1000);
+      if (on && c > 0) {
+        setCeiling(c);
+        setWhiteElo((v) => Math.min(v, c));
+        setBlackElo((v) => Math.min(v, c));
+      }
+    }).catch(() => {});
+    return () => { on = false; };
+  }, []);
 
   const stop = useCallback(() => { playingRef.current = false; setPlaying(false); }, []);
   const reset = useCallback(() => {
@@ -61,25 +76,26 @@ export default function WatchPage() {
 
   return (
     <main className="container">
-      <h1 className="title" style={{ fontSize: "2rem" }}>Featured <span>duel</span></h1>
+      <h1 className="title" style={{ fontSize: "2rem" }}>An <span>exhibition game</span></h1>
       <p className="subtitle" style={{ textAlign: "left", margin: "0.3rem 0 0.6rem" }}>
-        Two agents at the Elos you choose. Trained-network moves when the backend is
-        live, otherwise the Elo-scaled engine - so strength always tracks the dial.
+        Two engines at the ratings you choose, capped at the honest ceiling (~{ceiling}).
+        Trained-network moves when the backend is live, an Elo-scaled local engine
+        otherwise, and the source is always labelled.
       </p>
       <p className="muted" style={{ margin: "0 0 1.3rem", fontSize: "0.9rem" }}>
-        Prefer a panorama? <a href="/tiers">Watch every Elo tier at once →</a>
+        Prefer the whole club at once? <a href="/tiers" style={{ color: "var(--accent)" }}>Watch every table →</a>
       </p>
 
       <div className="card" style={{ marginBottom: "1.2rem" }}>
         <div className="vs">
           <div className="who">
-            <div className="avatar" style={{ background: "rgba(234,241,248,0.1)" }}>♔</div>
+            <div className="avatar">♔</div>
             <div className="nm">White</div>
             <div className="el">{whiteElo}</div>
           </div>
           <div className="mid">vs</div>
           <div className="who">
-            <div className="avatar" style={{ background: "rgba(20,24,33,0.8)" }}>♚</div>
+            <div className="avatar">♚</div>
             <div className="nm">Black</div>
             <div className="el">{blackElo}</div>
           </div>
@@ -92,9 +108,9 @@ export default function WatchPage() {
             <div className="evalbar"><i style={{ height: `${whiteHeight}%` }} /></div>
             <div style={{ flex: 1 }}>
               <Chessboard position={fen} arePiecesDraggable={false} boardWidth={460}
-                customBoardStyle={{ borderRadius: "10px" }}
-                customDarkSquareStyle={{ backgroundColor: "#26241f" }}
-                customLightSquareStyle={{ backgroundColor: "#cbb78f" }} />
+                customBoardStyle={{ borderRadius: "3px" }}
+                customDarkSquareStyle={{ backgroundColor: "#9a6b44" }}
+                customLightSquareStyle={{ backgroundColor: "#e8d2a8" }} />
             </div>
           </div>
           <p className="pill" style={{ marginTop: "0.6rem" }}>
@@ -104,21 +120,24 @@ export default function WatchPage() {
 
         <div className="panel-stack">
           <div className="card">
-            <label className="muted">White Elo: <b>{whiteElo}</b></label>
-            <input className="slider" type="range" min={600} max={2300} step={50} value={whiteElo}
+            <label className="muted">White rating: <b className="mono">{whiteElo}</b></label>
+            <input className="slider" type="range" min={450} max={ceiling} step={25} value={Math.min(whiteElo, ceiling)}
               onChange={(e) => setWhiteElo(Number(e.target.value))} />
-            <label className="muted" style={{ marginTop: "0.6rem", display: "block" }}>Black Elo: <b>{blackElo}</b></label>
-            <input className="slider" type="range" min={600} max={2300} step={50} value={blackElo}
+            <label className="muted" style={{ marginTop: "0.6rem", display: "block" }}>Black rating: <b className="mono">{blackElo}</b></label>
+            <input className="slider" type="range" min={450} max={ceiling} step={25} value={Math.min(blackElo, ceiling)}
               onChange={(e) => setBlackElo(Number(e.target.value))} />
             <div className="row" style={{ marginTop: "1rem" }}>
               {!playing ? <button className="btn" onClick={play}>Play</button>
                 : <button className="btn secondary" onClick={stop}>Pause</button>}
               <button className="btn secondary" onClick={reset}>Reset</button>
             </div>
+            <p className="pill" style={{ marginTop: "0.7rem" }}>
+              Sliders stop at the engine&apos;s measured ceiling. Nightly training raises it.
+            </p>
           </div>
           <div className="card">
             <b>Evaluation</b>
-            <p className="eval-num" style={{ marginTop: "0.4rem", color: evalP >= 0 ? "#eaf1f8" : "#f5a623" }}>
+            <p className="eval-num" style={{ marginTop: "0.4rem", color: evalP >= 0 ? "var(--ink)" : "var(--accent)" }}>
               {evalP >= 0 ? "+" : ""}{evalP.toFixed(1)} <span className="pill">(white advantage)</span>
             </p>
           </div>

@@ -53,15 +53,15 @@ export default function DashboardPage() {
           <div style={{ textAlign: "center" }}>
             <div className="label">{ladder?.calibrated_elo ? "Stockfish-calibrated Elo" : "Best ladder Elo"}</div>
             <div className="num" style={{ fontSize: "3.4rem" }}>{rating ? Math.round(rating) : "-"}</div>
-            <span className={`badge ${live ? "live" : ""}`}>{live ? "training live" : "last published run"}</span>
+            <span className={`badge ${live ? "live" : ""}`}>{live ? "backend live" : "last published run"}</span>
           </div>
           <div>
             <h1 className="title" style={{ fontSize: "1.7rem", textAlign: "left", margin: "0 0 0.4rem" }}>
-              Live <span>training dashboard</span>
+              The <span>scorebook</span>
             </h1>
             <p className="muted" style={{ margin: 0 }}>
-              Agents improve by continuous self-play; Stockfish grades them on a real scale.
-              Each position is handed to the agent that owns it:
+              The engine trains nightly by gated self-play with human-game replay, and
+              Stockfish signs the rating. Each position is handed to the agent that owns it:
             </p>
             <div className="chips" style={{ marginTop: "0.7rem" }}>
               {AGENTS.map((a) => (
@@ -84,12 +84,12 @@ export default function DashboardPage() {
         <div className="grid cols-3" style={{ marginTop: "0.6rem" }}>
           {[
             { n: "01", t: "Pre-train", d: "Behavioural cloning on real Lichess games.", tag: "pretrain/model.pt" },
-            { n: "02", t: "Post-train", d: "Self-play RL refines it, generation by generation.", tag: "posttrain/gen-*.pt" },
-            { n: "03", t: "Serve & grade", d: "Best net scaled to your Elo; Stockfish grades it.", tag: "/move · /calibrate" },
+            { n: "02", t: "Post-train nightly", d: "Gated self-play with human-game replay. Promoted only on a win.", tag: "posttrain/gen-*.pt" },
+            { n: "03", t: "Serve and grade", d: "The champion, scaled to an honest rating; Stockfish grades it.", tag: "/move · /calibrate" },
           ].map((s, i) => (
             <div key={s.n} style={{ position: "relative", padding: "0.4rem 0.2rem" }}>
               <div className="row" style={{ gap: "0.5rem" }}>
-                <span className="mono" style={{ color: "var(--accent2)" }}>{s.n}</span>
+                <span className="mono" style={{ color: "var(--accent)" }}>{s.n}</span>
                 <b>{s.t}</b>
                 {i < 2 && <span className="muted" style={{ marginLeft: "auto" }}>→</span>}
               </div>
@@ -106,19 +106,19 @@ export default function DashboardPage() {
           {peak != null && <span className="chip">peak <b>{Math.round(peak)}</b> Elo</span>}
         </div>
         <p className="muted">
-          Each point is a checkpoint, rated by material-adjudicated games vs a random
-          baseline (orange = the per-checkpoint measurement, small-sample noise; blue =
-          best reached). The curve is anchored so the trained endpoint equals the live
-          Stockfish-calibrated rating.
+          Each point is a checkpoint, rated by real games (brass = the per-checkpoint
+          measurement, small-sample noise; claret = best reached). The curve is anchored
+          so the endpoint equals the live Stockfish-calibrated rating, and nightly
+          training appends new entries.
         </p>
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={curve}>
-            <CartesianGrid strokeDasharray="3 3" stroke="#222a36" />
-            <XAxis dataKey="gen" stroke="#93a1b5" />
-            <YAxis stroke="#93a1b5" domain={["auto", "auto"]} />
-            <Tooltip contentStyle={{ background: "#0b1018", border: "1px solid #2a313c", borderRadius: 10 }} />
-            <Line type="monotone" dataKey="elo" stroke="#e8a33d" strokeWidth={1.5} dot={{ r: 2 }} opacity={0.7} />
-            <Line type="monotone" dataKey="best" stroke="#6db0ff" strokeWidth={2.5} dot={false} />
+            <CartesianGrid strokeDasharray="3 3" stroke="#d8cbb2" />
+            <XAxis dataKey="gen" stroke="#6f6250" />
+            <YAxis stroke="#6f6250" domain={["auto", "auto"]} />
+            <Tooltip contentStyle={{ background: "#faf5e8", border: "1px solid #cdbc9d", borderRadius: 10 }} />
+            <Line type="monotone" dataKey="elo" stroke="#97741f" strokeWidth={1.5} dot={{ r: 2 }} opacity={0.7} />
+            <Line type="monotone" dataKey="best" stroke="#8a3324" strokeWidth={2.5} dot={false} />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -129,12 +129,12 @@ export default function DashboardPage() {
             <h2>Self-play training loss</h2>
             <ResponsiveContainer width="100%" height={230}>
               <LineChart data={lossData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222a36" />
-                <XAxis dataKey="gen" stroke="#93a1b5" />
-                <YAxis stroke="#93a1b5" />
-                <Tooltip contentStyle={{ background: "#0b1018", border: "1px solid #2a313c", borderRadius: 10 }} />
-                <Line type="monotone" dataKey="loss_policy" stroke="#6db0ff" dot={false} strokeWidth={2} />
-                <Line type="monotone" dataKey="loss_value" stroke="#3fb950" dot={false} strokeWidth={2} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#d8cbb2" />
+                <XAxis dataKey="gen" stroke="#6f6250" />
+                <YAxis stroke="#6f6250" />
+                <Tooltip contentStyle={{ background: "#faf5e8", border: "1px solid #cdbc9d", borderRadius: 10 }} />
+                <Line type="monotone" dataKey="loss_policy" stroke="#8a3324" dot={false} strokeWidth={2} />
+                <Line type="monotone" dataKey="loss_value" stroke="#3f6d4e" dot={false} strokeWidth={2} />
               </LineChart>
             </ResponsiveContainer>
           </div>
@@ -154,11 +154,11 @@ export default function DashboardPage() {
             <h2>Information theory: I(feature; result)</h2>
             <ResponsiveContainer width="100%" height={230}>
               <BarChart data={miData} layout="vertical" margin={{ left: 30 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#222a36" />
-                <XAxis type="number" stroke="#93a1b5" />
-                <YAxis dataKey="name" type="category" stroke="#93a1b5" width={110} />
-                <Tooltip contentStyle={{ background: "#0b1018", border: "1px solid #2a313c", borderRadius: 10 }} />
-                <Bar dataKey="mi" fill="#b06dff" radius={[0, 6, 6, 0]} />
+                <CartesianGrid strokeDasharray="3 3" stroke="#d8cbb2" />
+                <XAxis type="number" stroke="#6f6250" />
+                <YAxis dataKey="name" type="category" stroke="#6f6250" width={110} />
+                <Tooltip contentStyle={{ background: "#faf5e8", border: "1px solid #cdbc9d", borderRadius: 10 }} />
+                <Bar dataKey="mi" fill="#7a5836" radius={[0, 6, 6, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
