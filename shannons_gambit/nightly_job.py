@@ -91,25 +91,36 @@ def main(argv: list[str] | None = None) -> None:
                   eval_games=args.eval_games, sft_data_dir="data",
                   sft_ratio=args.sft_ratio, device="cpu")
     trainer = ContinualTrainer(cfg)
-    for entry in trainer.run(args.gens):
+    entries = trainer.run(args.gens)
+    for entry in entries:
         m = entry.metrics
         print(f"gen {entry.gen}: elo={entry.elo} promoted={m.get('promoted')} "
               f"score_vs_champ={m.get('score_vs_champion')} sft={m.get('sft_batches')}",
               flush=True)
+    promoted = any(e.metrics.get("promoted") for e in entries)
 
-    # 4) honest rating: re-grade the champion against Stockfish when available
-    if not args.skip_calibrate:
+    # 4) honest rating. Re-grade ONLY when the champion actually changed (or has
+    #    no rating yet). Re-grading the same net every night just churns the
+    #    number with sampling noise; a stable champion keeps its stable rating.
+    from shannons_gambit.agents.ladder import Ladder as _L
+
+    champ = _L.load(RUN_DIR).champion()
+    needs_rating = champ is not None and champ.metrics.get("calibrated_elo") is None
+    if args.skip_calibrate:
+        print("== calibration skipped by flag ==", flush=True)
+    elif not (promoted or needs_rating):
+        print("== champion unchanged; keeping its calibrated rating ==", flush=True)
+    else:
         from shannons_gambit.agents.stockfish import find_stockfish
         from shannons_gambit.serve import ModelServer
 
         if find_stockfish(None) is None:
             print("== no stockfish binary; skipping calibration ==", flush=True)
         else:
-            print("== calibrating champion vs Stockfish ==", flush=True)
+            print("== calibrating new champion vs Stockfish ==", flush=True)
             server = ModelServer(RUN_DIR)
             try:
-                print(server.calibrate(n_positions=40, elo_games=4, movetime_ms=30,
-                                       with_phase_acpl=False), flush=True)
+                print(server.calibrate(movetime_ms=30, with_phase_acpl=False), flush=True)
             except Exception as exc:  # noqa: BLE001 - rating is best-effort
                 print("calibration failed:", exc, flush=True)
 

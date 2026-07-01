@@ -240,8 +240,8 @@ class ModelServer:
         }
 
     def calibrate(self, *, stockfish_path: str | None = None,
-                  anchors: tuple[int, ...] = (1350, 1700, 2100),
-                  elo_games: int = 4, n_positions: int = 60,
+                  anchors: tuple[int, ...] = (800, 1100, 1400, 1700),
+                  elo_games: int = 6, n_positions: int = 60,
                   movetime_ms: int = 30, with_elo: bool = True,
                   with_phase_acpl: bool = True) -> dict:
         """Score the served agent against Stockfish and store a calibrated Elo.
